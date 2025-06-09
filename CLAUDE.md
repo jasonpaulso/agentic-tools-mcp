@@ -22,20 +22,32 @@ This MCP server provides advanced task management and agent memory capabilities 
 
 ### Core Structure
 - **Entry Point**: `src/index.ts` - Starts the HTTP server
-- **HTTP Server**: `src/streamable-server.ts` - Express-based HTTP MCP server with StreamableHTTPServerTransport
+- **HTTP Server**: `src/streamable-server.ts` - Express-based HTTP MCP server with dual transport support
 - **Legacy STDIO Server**: `src/server.ts` - Original STDIO-based MCP server (still available for reference)
 - **Storage Config**: `src/utils/storage-config.ts` - Handles --claude flag for global vs project-specific storage
+- **Tool Registry**: `src/tools/registry.ts` - Modular tool management system
+- **Tool Modules**: `src/tools/` - Organized by feature area (task-management, agent-memories)
 
 ### HTTP Server Details
-- Uses Express.js with StreamableHTTPServerTransport
-- Endpoints:
+- Uses Express.js with dual transport support:
+  
+  **Modern Protocol (StreamableHTTPServerTransport)**:
   - POST `/mcp` - Main MCP communication
   - GET `/mcp` - Server-to-client notifications (SSE)
   - DELETE `/mcp` - Session termination
+  - Supports session resumability
+  
+  **Legacy Protocol (SSEServerTransport)**:
+  - GET `/sse` - Establish SSE connection
+  - POST `/messages` - Send messages to server
+  - Backwards compatibility for SSE-limited clients
+  
 - Storage configuration via headers:
   - `mcp-use-global-directory: true` - Enable global directory mode (like --claude flag)
+  - `mcp-session-id: <session-id>` - Session identifier for request routing
   - Default: project-specific storage
 - Per-session configuration stored in memory
+- Graceful shutdown with SIGTERM handling
 
 ### Feature: Task Management (`src/features/task-management/`)
 Hierarchical task system with Projects → Tasks → Subtasks:

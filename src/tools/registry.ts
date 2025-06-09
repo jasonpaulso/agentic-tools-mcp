@@ -1,9 +1,12 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { ToolDefinition, ToolConfig } from './base-tool.js';
-import { StorageConfig } from '../utils/storage-config.js';
-import { FileStorage } from '../features/task-management/storage/file-storage.js';
+import { z } from "zod";
 import { FileStorage as MemoryFileStorage } from '../features/agent-memories/storage/file-storage.js';
-import { resolveWorkingDirectory } from '../utils/storage-config.js';
+import { FileStorage } from "../features/task-management/storage/file-storage.js";
+import {
+  resolveWorkingDirectory,
+  StorageConfig,
+} from "../utils/storage-config.js";
+import { ToolDefinition } from "./base-tool.js";
 
 /**
  * Tool registry for managing MCP tools
@@ -25,7 +28,7 @@ export class ToolRegistry {
     this.server.tool(
       tool.name,
       tool.description,
-      tool.inputSchema,
+      tool.inputSchema as unknown as Record<string, z.ZodTypeAny>,
       tool.handler
     );
   }

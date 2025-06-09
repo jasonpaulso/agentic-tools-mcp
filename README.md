@@ -196,6 +196,34 @@ npx -y @pimzino/agentic-tools-mcp
 npx -y @pimzino/agentic-tools-mcp --claude
 ```
 
+### HTTP Server Mode (Advanced)
+The server also includes an HTTP transport mode with backwards compatibility for SSE-limited clients:
+
+```bash
+# Clone and run the HTTP server
+git clone https://github.com/Pimzino/agentic-tools-mcp.git
+cd agentic-tools-mcp
+npm install
+npm start
+```
+
+The HTTP server listens on port 3000 by default and supports:
+
+#### Modern Clients (StreamableHTTPServerTransport)
+- **POST /mcp** - Client-to-server messages
+- **GET /mcp** - Server-to-client notifications (SSE)
+- **DELETE /mcp** - Session termination
+- Session management with resumability
+
+#### Legacy SSE Clients (SSEServerTransport)
+- **GET /sse** - Establish SSE connection
+- **POST /messages** - Send messages to server
+- Backwards compatibility for older MCP implementations
+
+#### Configuration via Headers
+- `mcp-use-global-directory: true` - Enable global directory mode (like --claude flag)
+- `mcp-session-id: <session-id>` - Session identifier for request routing
+
 ## Data Models
 
 ### Project
