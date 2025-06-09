@@ -29,6 +29,7 @@ import { getVersion } from "./utils/version.js";
 import { ToolRegistry } from "./tools/registry.js";
 import { createTaskManagementTools } from "./tools/task-management/index.js";
 import { createAgentMemoryTools } from "./tools/agent-memories/index.js";
+import { createPromptsTools } from "./tools/prompts/index.js";
 
 const app = express();
 app.use(express.json());
@@ -104,6 +105,7 @@ app.post(
       registry.registerTools([
         ...createTaskManagementTools(registry),
         ...createAgentMemoryTools(registry),
+        ...createPromptsTools(registry),
       ]);
 
       // Connect to the MCP server

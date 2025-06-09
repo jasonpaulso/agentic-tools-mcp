@@ -41,6 +41,16 @@ This MCP server is part of a complete task and memory management ecosystem:
 - **JSON Storage**: Individual JSON files organized by category, named after memory titles
 - **Project-Specific**: Isolated memory storage per working directory
 
+### 📝 Prompt Templates System
+- **Reusable Prompts**: Create and manage prompt templates with structured arguments
+- **System Prompts**: 8 pre-built prompts for common workflows (project kickoff, daily standup, sprint planning, etc.)
+- **Flexible Arguments**: Define required/optional arguments with defaults and descriptions
+- **Template Engine**: Support for variable substitution in templates using {{variable}} syntax
+- **Message Sequences**: Define predefined conversation flows with user/assistant/system messages
+- **Categorization**: Organize prompts by category and tags for easy discovery
+- **Smart Search**: Find prompts across names, descriptions, categories, and tags
+- **Execution Engine**: Execute prompts with argument validation and template processing
+
 ### 🔧 MCP Tools Available
 
 #### Project Management
@@ -79,6 +89,16 @@ This MCP server is part of a complete task and memory management ecosystem:
 - `list_memories` - List memories with optional filtering
 - `update_memory` - Edit memory title, content, metadata, or categorization
 - `delete_memory` - Delete a memory (requires confirmation)
+
+#### Prompt Management
+- `create_prompt` - Create reusable prompt templates with structured arguments
+- `list_prompts` - Browse available prompts organized by category
+- `get_prompt` - View detailed prompt information including arguments and messages
+- `update_prompt` - Modify existing prompt templates
+- `delete_prompt` - Remove prompt templates (requires confirmation)
+- `search_prompts` - Find prompts by searching names, descriptions, categories, and tags
+- `execute_prompt` - Execute a saved prompt template with provided arguments
+- `initialize_system_prompts` - Load 8 pre-built prompts for common workflows
 
 **Important**: All tools require a `workingDirectory` parameter to specify where the data should be stored. This enables project-specific task and memory management.
 
@@ -283,6 +303,23 @@ The HTTP server listens on port 3000 by default and supports:
   createdAt: string;            // ISO timestamp
   updatedAt: string;            // ISO timestamp
   category?: string;            // Optional categorization
+}
+```
+
+### Prompt
+```typescript
+{
+  id: string;                    // Unique identifier
+  name: string;                  // Prompt name (e.g., "project-kickoff")
+  description: string;           // Clear description of what the prompt does
+  arguments: PromptArgument[];   // Structured arguments with names, descriptions, and defaults
+  category?: string;             // Category for organization (e.g., "project-management")
+  tags?: string[];               // Tags for easier discovery
+  template?: string;             // Template string with {{variable}} placeholders
+  messages?: PromptMessage[];    // Predefined message sequence
+  metadata?: Record<string, any>; // Additional metadata
+  createdAt: string;             // ISO timestamp
+  updatedAt: string;             // ISO timestamp
 }
 ```
 
@@ -503,6 +540,42 @@ We're grateful to the open-source community and the following projects that make
 
 ### Special Thanks
 - **Open Source Community** - For creating the tools and libraries that make this project possible
+
+## System Prompts
+
+The server includes 8 pre-built prompt templates for common workflows. Initialize them with the `initialize_system_prompts` tool:
+
+### 1. **project-kickoff**
+Initialize new projects with standard structure and initial tasks.
+- Arguments: `projectType` (required), `projectName` (required), `techStack`, `description`
+
+### 2. **daily-standup**
+Generate daily standup reports with progress and blockers.
+- Arguments: `projectId`, `lookbackDays` (default: 1)
+
+### 3. **sprint-planning**
+Plan sprints based on priorities and capacity.
+- Arguments: `sprintDuration` (required), `teamCapacity` (required), `projectId`, `focusAreas`
+
+### 4. **code-review-checklist**
+Generate context-specific code review checklists.
+- Arguments: `taskId` (required), `files`, `prNumber`
+
+### 5. **technical-decision**
+Document technical decisions with ADR format.
+- Arguments: `decision` (required), `context` (required), `alternatives`, `consequences`
+
+### 6. **breakdown-complex-task**
+Intelligently break down complex tasks into subtasks.
+- Arguments: `taskId` (required), `targetComplexity` (default: 3), `maxSubtasks` (default: 10)
+
+### 7. **find-solution**
+Search memories and research for problem solutions.
+- Arguments: `problem` (required), `context`, `searchExternal` (default: false)
+
+### 8. **progress-report**
+Generate comprehensive project progress reports.
+- Arguments: `reportType` (required), `projectId`, `includeMetrics` (default: true), `period` (default: "last week")
 
 ## License
 
