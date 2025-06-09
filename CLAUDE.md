@@ -12,7 +12,7 @@ npm run dev        # Compile TypeScript in watch mode
 
 ### Running
 ```bash
-npm start          # Start the HTTP MCP server (listens on port 3000)
+npm start          # Start the HTTP MCP server (listens on PORT env var, default: 3000)
 npx -y @jasonpaulso/agentic-tools-mcp  # Run directly via npx
 ```
 
@@ -68,6 +68,12 @@ Web documentation scraping and indexing system:
 - **Scraping**: HTML to Markdown conversion with metadata extraction
 - **Search**: Text-based search with relevance scoring and snippet highlighting
 - **Tools**: scrape_docs, search_docs, list_libraries, remove_docs
+
+### Environment Variables
+- `PORT` - HTTP server port (default: 3000)
+- `NODE_ENV` - Node.js environment (development/production)
+- `CLAUDE_FLAG` - Enable global directory mode by default
+- `PATH_MAPPING` - Docker host-to-container path mapping
 
 ### Key Design Patterns
 - All tools require `workingDirectory` parameter for project isolation

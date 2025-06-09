@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import 'dotenv/config';
 import { parseCommandLineArgs } from "./utils/storage-config.js";
 import { getVersionString } from "./utils/version.js";
 
@@ -19,7 +20,7 @@ async function main() {
     console.log(
       `🚀 Agentic Tools MCP Server ${getVersionString()} started successfully`
     );
-    console.log("🌐 HTTP server listening on http://localhost:3000");
+    console.log(`🌐 HTTP server listening on http://localhost:${process.env.PORT || 3000}`);
     console.log("");
 
     // Show storage mode

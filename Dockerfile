@@ -56,7 +56,8 @@ RUN mkdir -p /data && \
 # Switch to non-root user
 USER nodejs
 
-# Expose the HTTP server port
+# Expose the HTTP server port (default: 3000, configurable via PORT env var)
+# Note: EXPOSE is just documentation - actual port is controlled by PORT environment variable
 EXPOSE 3000
 
 # Use dumb-init to handle signals properly

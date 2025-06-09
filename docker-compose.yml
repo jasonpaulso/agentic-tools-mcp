@@ -6,8 +6,10 @@ services:
     image: agentic-tools-mcp:latest
     container_name: agentic-tools-mcp
     ports:
-      - "3000:3000"
+      - "${PORT:-3000}:${PORT:-3000}"
     environment:
+      # Port configuration
+      - PORT=${PORT:-3000}
       # Node.js environment
       - NODE_ENV=production
       # Optional: Enable global directory mode by default
@@ -26,7 +28,7 @@ services:
       - /Users/jasonschulz/Developer:/workspace/Developer
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1); }).on('error', () => { process.exit(1); })"]
+      test: ["CMD", "sh", "-c", "node -e \"require('http').get('http://localhost:' + (process.env.PORT || 3000) + '/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1); }).on('error', () => { process.exit(1); })\""]
       interval: 30s
       timeout: 10s
       retries: 3

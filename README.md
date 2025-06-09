@@ -127,6 +127,33 @@ docker-compose -f docker-compose.workspace.yml up -d
 
 See [README.Docker.md](README.Docker.md) for detailed Docker setup instructions.
 
+### Configuration
+
+The server can be configured using environment variables. Create a `.env` file in the project root or set environment variables:
+
+```bash
+# Port configuration (default: 3000)
+PORT=3000
+
+# Node environment
+NODE_ENV=production
+
+# Enable global directory mode (optional)
+# CLAUDE_FLAG=true
+
+# Docker path mapping (for Docker deployments)
+# PATH_MAPPING=/Users/username/Developer:/workspace/Developer
+```
+
+To use a custom port:
+```bash
+# Set port via environment variable
+PORT=8080 npm start
+
+# Or with Docker Compose
+PORT=8080 docker-compose up -d
+```
+
 ### Storage Modes
 
 The MCP server supports two storage modes:
@@ -208,9 +235,9 @@ The server provides an HTTP API that can be integrated with any MCP-compatible c
 docker-compose -f docker-compose.simple-workspace.yml up -d
 ```
 
-2. Connect your MCP client to `http://localhost:3000`
+2. Connect your MCP client to `http://localhost:3000` (or your configured PORT)
 
-The HTTP server listens on port 3000 by default and supports:
+The HTTP server listens on port 3000 by default (configurable via PORT environment variable) and supports:
 
 #### Modern Clients (StreamableHTTPServerTransport)
 - **POST /mcp** - Client-to-server messages

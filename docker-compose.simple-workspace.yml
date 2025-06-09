@@ -6,23 +6,25 @@ services:
     image: agentic-tools-mcp:latest
     container_name: agentic-tools-mcp
     ports:
-      - "3000:3000"
+      - "${PORT:-3000}:${PORT:-3000}"
     environment:
+      # Port configuration
+      - PORT=${PORT:-3000}
       - NODE_ENV=production
       # Simple approach: map entire home directory
       # This means no path translation needed - container paths match host paths
-      - PATH_MAPPING=/Users/jasonschulz:/Users/jasonschulz
+      - PATH_MAPPING=${SIMPLE_PATH_MAPPING}
     volumes:
       # Map entire home directory - simplest approach
       # Paths in container will match your host paths exactly
-      - /Users/jasonschulz:/Users/jasonschulz
+      - ${SIMPLE_PATH_MAPPING}
       
       # Storage volumes for MCP data
       - ./data:/app/.agentic-tools-mcp
       - ~/.agentic-tools-mcp:/data/.agentic-tools-mcp
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1); }).on('error', () => { process.exit(1); })"]
+      test: ["CMD", "sh", "-c", "node -e \"require('http').get('http://localhost:' + (process.env.PORT || 3000) + '/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1); }).on('error', () => { process.exit(1); })\""]
       interval: 30s
       timeout: 10s
       retries: 3
