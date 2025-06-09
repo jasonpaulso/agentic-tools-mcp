@@ -3,6 +3,7 @@ import { ToolDefinition, ToolConfig } from './base-tool.js';
 import { StorageConfig } from '../utils/storage-config.js';
 import { FileStorage } from '../features/task-management/storage/file-storage.js';
 import { FileStorage as MemoryFileStorage } from '../features/agent-memories/storage/file-storage.js';
+import { FileStorage as PromptsFileStorage } from '../features/prompts/storage/file-storage.js';
 import { resolveWorkingDirectory } from '../utils/storage-config.js';
 
 /**
@@ -60,6 +61,16 @@ export class ToolRegistry {
   async createMemoryStorage(workingDirectory: string): Promise<MemoryFileStorage> {
     const resolvedDirectory = resolveWorkingDirectory(workingDirectory, this.config);
     const storage = new MemoryFileStorage(resolvedDirectory);
+    await storage.initialize();
+    return storage;
+  }
+
+  /**
+   * Create prompt storage instance
+   */
+  async createPromptStorage(workingDirectory: string): Promise<PromptsFileStorage> {
+    const resolvedDirectory = resolveWorkingDirectory(workingDirectory, this.config);
+    const storage = new PromptsFileStorage(resolvedDirectory);
     await storage.initialize();
     return storage;
   }
