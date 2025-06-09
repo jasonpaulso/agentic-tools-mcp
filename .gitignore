@@ -1,6 +1,6 @@
 # .gitignore
-agentic-tools-mcp/
-/docs
+# agentic-tools-mcp/
+# /docs
 
 # Dependencies
 node_modules/
