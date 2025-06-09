@@ -1,18 +1,12 @@
 # Agentic Tools MCP Server
 
-[![npm version](https://badge.fury.io/js/@pimzino%2Fagentic-tools-mcp.svg)](https://badge.fury.io/js/@pimzino%2Fagentic-tools-mcp)
-[![npm downloads](https://img.shields.io/npm/dm/@pimzino/agentic-tools-mcp.svg)](https://www.npmjs.com/package/@pimzino/agentic-tools-mcp)
-[![GitHub stars](https://img.shields.io/github/stars/Pimzino/agentic-tools-mcp.svg)](https://github.com/Pimzino/agentic-tools-mcp/stargazers)
-[![GitHub license](https://img.shields.io/github/license/Pimzino/agentic-tools-mcp.svg)](https://github.com/Pimzino/agentic-tools-mcp/blob/main/LICENSE)
-[![Node.js Version](https://img.shields.io/node/v/@pimzino/agentic-tools-mcp.svg)](https://nodejs.org/)
-
 A comprehensive Model Context Protocol (MCP) server providing AI assistants with powerful **advanced task management** and **agent memories** capabilities with **project-specific storage**.
 
 ## 🔗 Ecosystem
 
 This MCP server is part of a complete task and memory management ecosystem:
 
-- **🖥️ [VS Code Extension](https://github.com/Pimzino/agentic-tools-mcp-companion)** - Beautiful GUI interface for managing tasks and memories directly in VS Code
+- **🖥️ [VS Code Extension](https://github.com/Pimzino/agentic-tools-mcp-companion)** - Beautiful GUI interface for managing tasks and memories directly in VS Code (credit: [Pizmino](https://github.com/Pimzino))
 - **⚡ MCP Server** (this repository) - Advanced AI agent tools and API for intelligent task management
 
 > **💡 Pro Tip**: Use both together for the ultimate productivity experience! The VS Code extension provides a visual interface while the MCP server enables AI assistant integration with advanced features like PRD parsing, task recommendations, and research capabilities.
@@ -102,19 +96,30 @@ This MCP server is part of a complete task and memory management ecosystem:
 
 **Important**: All tools require a `workingDirectory` parameter to specify where the data should be stored. This enables project-specific task and memory management.
 
-## Installation
+## Deployment
 
-### Quick Start
+### Docker Installation (Recommended)
+
+The Agentic Tools MCP Server is distributed as a Docker container for easy deployment and consistent runtime environment.
+
 ```bash
-npx -y @pimzino/agentic-tools-mcp
+# Clone the repository
+git clone https://github.com/jasonpaulso/agentic-tools-mcp.git
+cd agentic-tools-mcp
+
+# Choose your deployment strategy:
+
+# Option 1: Simple workspace (maps entire home directory)
+docker-compose -f docker-compose.simple-workspace.yml up -d
+
+# Option 2: Single directory (default, maps ~/Developer only)
+docker-compose up -d
+
+# Option 3: Custom directories (edit docker-compose.workspace.yml first)
+docker-compose -f docker-compose.workspace.yml up -d
 ```
 
-### Global Installation
-```bash
-npm install -g @pimzino/agentic-tools-mcp
-```
-
-## Usage
+See [README.Docker.md](README.Docker.md) for detailed Docker setup instructions.
 
 ### Storage Modes
 
@@ -123,71 +128,56 @@ The MCP server supports two storage modes:
 #### 📁 Project-Specific Mode (Default)
 Data is stored in `.agentic-tools-mcp/` subdirectories within each project's working directory.
 
-```bash
-npx -y @pimzino/agentic-tools-mcp
-```
-
 #### 🌐 Global Directory Mode
-Use the `--claude` flag to store all data in a standardized global directory:
+Use the `--claude` flag or set header `mcp-use-global-directory: true` to store all data in a standardized global directory:
 - **Windows**: `C:\Users\{username}\.agentic-tools-mcp\`
 - **macOS/Linux**: `~/.agentic-tools-mcp/`
 
-```bash
-npx -y @pimzino/agentic-tools-mcp --claude
-```
-
-**When to use `--claude` flag:**
+**When to use global mode:**
 - With Claude Desktop client (non-project-specific usage)
 - When you want a single global workspace for all tasks and memories
 - For AI assistants that work across multiple projects
 
-**Note**: When using `--claude` flag, the `workingDirectory` parameter in all tools is ignored and the global directory is used instead.
+**Note**: When using global mode, the `workingDirectory` parameter in all tools is ignored and the global directory is used instead.
 
 ### With Claude Desktop
 
-#### Project-Specific Mode (Default)
+Since Claude Desktop requires an MCP server accessible via command line, you'll need to run the Docker container and configure Claude Desktop to connect to it via HTTP.
+
+1. Start the Docker container:
+```bash
+docker-compose -f docker-compose.simple-workspace.yml up -d
+```
+
+2. Configure Claude Desktop to use the HTTP endpoint:
 ```json
 {
   "mcpServers": {
     "agentic-tools": {
-      "command": "npx",
-      "args": ["-y", "@pimzino/agentic-tools-mcp"]
+      "url": "http://localhost:3000/mcp",
+      "transport": "http",
+      "headers": {
+        "mcp-use-global-directory": "true"
+      }
     }
   }
 }
 ```
 
-#### Global Directory Mode (Recommended for Claude Desktop)
-```json
-{
-  "mcpServers": {
-    "agentic-tools": {
-      "command": "npx",
-      "args": ["-y", "@pimzino/agentic-tools-mcp", "--claude"]
-    }
-  }
-}
-```
-
-**Note**: The server now includes both task management and agent memories features.
+**Note**: The server includes task management, agent memories, and prompt management features.
 
 ### With AugmentCode
 
-#### Project-Specific Mode (Default)
-1. Open Augment Settings Panel (gear icon)
-2. Add MCP server:
-   - **Name**: `agentic-tools`
-   - **Command**: `npx -y @pimzino/agentic-tools-mcp`
-3. Restart VS Code
+AugmentCode can connect to the HTTP server endpoint:
 
-#### Global Directory Mode
-1. Open Augment Settings Panel (gear icon)
-2. Add MCP server:
-   - **Name**: `agentic-tools`
-   - **Command**: `npx -y @pimzino/agentic-tools-mcp --claude`
-3. Restart VS Code
+1. Start the Docker container:
+```bash
+docker-compose -f docker-compose.simple-workspace.yml up -d
+```
 
-**Features Available**: Task management, agent memories, and text-based search capabilities.
+2. Configure AugmentCode to use the HTTP endpoint (if supported by your version)
+
+**Features Available**: Task management, agent memories, prompt management, and text-based search capabilities.
 
 ### With VS Code Extension (Recommended)
 For the best user experience, install the [**Agentic Tools MCP Companion**](https://github.com/Pimzino/agentic-tools-mcp-companion) VS Code extension:
@@ -204,28 +194,15 @@ For the best user experience, install the [**Agentic Tools MCP Companion**](http
 - 🤖 **AI Collaboration**: Human planning with AI execution for optimal productivity
 
 ### With Other MCP Clients
-The server uses STDIO transport and can be integrated with any MCP-compatible client:
 
-#### Project-Specific Mode
+The server provides an HTTP API that can be integrated with any MCP-compatible client:
+
+1. Start the Docker container:
 ```bash
-npx -y @pimzino/agentic-tools-mcp
+docker-compose -f docker-compose.simple-workspace.yml up -d
 ```
 
-#### Global Directory Mode
-```bash
-npx -y @pimzino/agentic-tools-mcp --claude
-```
-
-### HTTP Server Mode (Advanced)
-The server also includes an HTTP transport mode with backwards compatibility for SSE-limited clients:
-
-```bash
-# Clone and run the HTTP server
-git clone https://github.com/Pimzino/agentic-tools-mcp.git
-cd agentic-tools-mcp
-npm install
-npm start
-```
+2. Connect your MCP client to `http://localhost:3000`
 
 The HTTP server listens on port 3000 by default and supports:
 
@@ -452,15 +429,6 @@ All MCP tools require a `workingDirectory` parameter that specifies:
 
 ## Development
 
-### Building from Source
-```bash
-git clone <repository>
-cd agentic-tools-mcp
-npm install
-npm run build
-npm start
-```
-
 ### Project Structure
 ```
 src/
@@ -584,15 +552,6 @@ MIT License - see LICENSE file for details.
 ## Contributing
 
 Contributions are welcome! Please feel free to submit issues and pull requests.
-
-### Development Setup
-```bash
-git clone <repository>
-cd agentic-tools-mcp
-npm install
-npm run build
-npm start
-```
 
 ## Related Projects
 

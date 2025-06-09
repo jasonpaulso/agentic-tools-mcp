@@ -13,7 +13,7 @@ npm run dev        # Compile TypeScript in watch mode
 ### Running
 ```bash
 npm start          # Start the HTTP MCP server (listens on port 3000)
-npx -y @pimzino/agentic-tools-mcp  # Run directly via npx
+npx -y @jasonpaulso/agentic-tools-mcp  # Run directly via npx
 ```
 
 ## Architecture

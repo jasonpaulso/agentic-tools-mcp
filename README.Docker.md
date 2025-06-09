@@ -6,25 +6,52 @@ This guide explains how to run the Agentic Tools MCP Server using Docker.
 
 Since this MCP server needs to access project directories on your host system, you must configure volume mounts and path mappings. The server cannot access host paths that aren't mounted into the container.
 
-### Solution 1: Use docker-compose.workspace.yml (Recommended)
+### Solution 1: Simple Workspace (Recommended for most users)
+
+Maps your entire home directory - no path translation needed:
 
 ```bash
-# Edit docker-compose.workspace.yml to add your directories
-# Then run:
+docker-compose -f docker-compose.simple-workspace.yml up -d
+```
+
+**Pros**: Simple, works with any path under your home directory
+**Cons**: Gives container access to your entire home directory
+
+### Solution 2: Specific Directories (More secure)
+
+Maps only specific directories you need:
+
+```bash
+# Edit docker-compose.workspace.yml to customize your directories
 docker-compose -f docker-compose.workspace.yml up -d
 ```
 
-### Solution 2: Mount directories manually
+**Pros**: More secure, only exposes needed directories
+**Cons**: Requires editing the file to add new directories
+
+### Solution 3: Single Directory (Simplest)
+
+If all your projects are under one directory:
+
+```bash
+docker-compose up -d
+```
+
+This uses the default docker-compose.yml which maps `/Users/jasonschulz/Developer`.
+
+### Solution 4: Manual Docker Run
 
 ```bash
 docker run -d \
   -p 3000:3000 \
-  -v /Users/jasonschulz/Developer:/workspace/Developer:ro \
+  -v /Users/jasonschulz/Developer:/workspace/Developer \
   -e PATH_MAPPING="/Users/jasonschulz/Developer:/workspace/Developer" \
   -v ./data:/app/.agentic-tools-mcp \
   --name agentic-tools-mcp \
   agentic-tools-mcp
 ```
+
+**Note**: The volume mount must be read-write (not `:ro`) because the MCP server creates `.agentic-tools-mcp` directories within your project directories for storing task and memory data.
 
 When calling the MCP tools, use the original host paths - they'll be automatically translated to container paths.
 

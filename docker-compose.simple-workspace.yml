@@ -10,22 +10,18 @@ services:
     ports:
       - "3000:3000"
     environment:
-      # Node.js environment
       - NODE_ENV=production
-      # Optional: Enable global directory mode by default
-      # - CLAUDE_FLAG=true
-      # Path mapping for host filesystem access (required for project directories)
-      # Format: "host_path:container_path,host_path2:container_path2"
-      # Example: "/Users:/workspace/Users,/home:/workspace/home"
-      # - PATH_MAPPING=/Users:/workspace/Users
-      - PATH_MAPPING=/Users/jasonschulz/Developer:/workspace/Developer
+      # Simple approach: map entire home directory
+      # This means no path translation needed - container paths match host paths
+      - PATH_MAPPING=/Users/jasonschulz:/Users/jasonschulz
     volumes:
-      # Mount local storage directory for persistence
-      # For project-specific storage (default)
+      # Map entire home directory - simplest approach
+      # Paths in container will match your host paths exactly
+      - /Users/jasonschulz:/Users/jasonschulz
+      
+      # Storage volumes for MCP data
       - ./data:/app/.agentic-tools-mcp
-      # For global storage (when using --claude flag or header)
       - ~/.agentic-tools-mcp:/data/.agentic-tools-mcp
-      - /Users/jasonschulz/Developer:/workspace/Developer
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1); }).on('error', () => { process.exit(1); })"]

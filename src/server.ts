@@ -79,7 +79,7 @@ app.post(
 
       const server = new McpServer(
         {
-          name: "@pimzino/agentic-tools-mcp",
+          name: "@jasonpaulso/agentic-tools-mcp",
           version: getVersion(),
         },
         {

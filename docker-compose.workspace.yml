@@ -11,13 +11,20 @@ services:
       - "3000:3000"
     environment:
       - NODE_ENV=production
-      # Map host paths to container paths
-      - PATH_MAPPING=/workspace:/workspace,/Users:/Users
+      # Map host paths to container paths - must match the volume mounts below
+      - PATH_MAPPING=/Users/jasonschulz/Developer:/Users/jasonschulz/Developer,/Users/jasonschulz/Documents:/Users/jasonschulz/Documents,/Users/jasonschulz/Desktop:/Users/jasonschulz/Desktop
     volumes:
-      # Map your workspace directory
-      - /Users/jasonschulz/Developer:/workspace/Developer:ro
-      # Or map entire home directory (be careful with permissions)
-      # - /Users/jasonschulz:/Users/jasonschulz:ro
+      # Map your directories - paths inside container match host paths for simplicity
+      # Developer directory (for code projects)
+      - /Users/jasonschulz/Developer:/Users/jasonschulz/Developer
+      # Documents directory (for document-based projects)
+      - /Users/jasonschulz/Documents:/Users/jasonschulz/Documents
+      # Desktop directory (for quick access)
+      - /Users/jasonschulz/Desktop:/Users/jasonschulz/Desktop
+      
+      # Alternative: Map entire home directory (simpler but less secure)
+      # - /Users/jasonschulz:/Users/jasonschulz
+      # Then use PATH_MAPPING=/Users/jasonschulz:/Users/jasonschulz
       
       # Storage volumes
       - ./data:/app/.agentic-tools-mcp
