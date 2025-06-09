@@ -1,883 +1,283 @@
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { FileStorage } from './features/task-management/storage/file-storage.js';
-import { FileStorage as MemoryFileStorage } from './features/agent-memories/storage/file-storage.js';
-import { getVersion } from './utils/version.js';
-import { StorageConfig, resolveWorkingDirectory, getWorkingDirectoryDescription } from './utils/storage-config.js';
-import { z } from 'zod';
-
-// Project tools
-import { createListProjectsTool } from './features/task-management/tools/projects/list.js';
-import { createCreateProjectTool } from './features/task-management/tools/projects/create.js';
-import { createGetProjectTool } from './features/task-management/tools/projects/get.js';
-import { createUpdateProjectTool } from './features/task-management/tools/projects/update.js';
-import { createDeleteProjectTool } from './features/task-management/tools/projects/delete.js';
-
-// Task tools
-import { createListTasksTool } from './features/task-management/tools/tasks/list.js';
-import { createCreateTaskTool } from './features/task-management/tools/tasks/create.js';
-import { createGetTaskTool } from './features/task-management/tools/tasks/get.js';
-import { createUpdateTaskTool } from './features/task-management/tools/tasks/update.js';
-import { createDeleteTaskTool } from './features/task-management/tools/tasks/delete.js';
-
-// Subtask tools
-import { createListSubtasksTool } from './features/task-management/tools/subtasks/list.js';
-import { createCreateSubtaskTool } from './features/task-management/tools/subtasks/create.js';
-import { createGetSubtaskTool } from './features/task-management/tools/subtasks/get.js';
-import { createUpdateSubtaskTool } from './features/task-management/tools/subtasks/update.js';
-import { createDeleteSubtaskTool } from './features/task-management/tools/subtasks/delete.js';
-
-// Memory tools
-import { createCreateMemoryTool } from './features/agent-memories/tools/memories/create.js';
-import { createSearchMemoriesTool } from './features/agent-memories/tools/memories/search.js';
-import { createGetMemoryTool } from './features/agent-memories/tools/memories/get.js';
-import { createListMemoriesTool } from './features/agent-memories/tools/memories/list.js';
-import { createUpdateMemoryTool } from './features/agent-memories/tools/memories/update.js';
-import { createDeleteMemoryTool } from './features/agent-memories/tools/memories/delete.js';
-
-// Advanced task management tools (TaskMaster-like features)
-import { createParsePRDTool } from './features/task-management/tools/prd/parse-prd.js';
-import { createNextTaskRecommendationTool } from './features/task-management/tools/recommendations/next-task.js';
-import { createComplexityAnalysisTool } from './features/task-management/tools/analysis/complexity-analysis.js';
-import { createProgressInferenceTool } from './features/task-management/tools/analysis/progress-inference.js';
-import { createTaskResearchTool } from './features/task-management/tools/research/task-research.js';
-import { createResearchQueriesGeneratorTool } from './features/task-management/tools/research/research-queries.js';
-
 /**
- * Create storage instance for a specific working directory
+ * HTTP-based MCP server for Agentic Tools with backwards compatibility
+ * 
+ * This server supports two transport methods:
+ * 
+ * 1. StreamableHTTPServerTransport (modern protocol):
+ *    - Endpoints: /mcp (POST/GET/DELETE)
+ *    - Supports resumability and session management
+ * 
+ * 2. SSEServerTransport (legacy protocol for SSE-limited clients):
+ *    - Endpoints: /sse (GET), /messages (POST)
+ *    - Provides backwards compatibility for older clients
+ * 
+ * Configuration:
+ * - To enable global directory mode (equivalent to --claude flag), clients should set
+ *   the "mcp-use-global-directory: true" header in the initial request
+ * - Otherwise, project-specific storage will be used (default)
  */
-async function createStorage(workingDirectory: string, config: StorageConfig): Promise<FileStorage> {
-  const resolvedDirectory = resolveWorkingDirectory(workingDirectory, config);
-  const storage = new FileStorage(resolvedDirectory);
-  await storage.initialize();
-  return storage;
-}
+import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
+import express from "express";
+import { IncomingMessage, ServerResponse } from "http";
+import { randomUUID } from "node:crypto";
+import { StorageConfig } from "./utils/storage-config.js";
+import { getVersion } from "./utils/version.js";
+import { ToolRegistry } from "./tools/registry.js";
+import { createTaskManagementTools } from "./tools/task-management/index.js";
+import { createAgentMemoryTools } from "./tools/agent-memories/index.js";
+import { createPromptsTools } from "./tools/prompts/index.js";
 
-/**
- * Create memory storage instance for a specific working directory
- */
-async function createMemoryStorage(workingDirectory: string, config: StorageConfig): Promise<MemoryFileStorage> {
-  const resolvedDirectory = resolveWorkingDirectory(workingDirectory, config);
-  const storage = new MemoryFileStorage(resolvedDirectory);
-  await storage.initialize();
-  return storage;
-}
+const app = express();
+app.use(express.json());
 
-/**
- * Create and configure the MCP server for task management and agent memories
- */
-export async function createServer(config: StorageConfig = { useGlobalDirectory: false }): Promise<McpServer> {
-  // Create MCP server with dynamic version from package.json
-  const server = new McpServer({
-    name: '@pimzino/agentic-tools-mcp',
-    version: getVersion()
+// Map to store transports by session ID
+const transports: { [sessionId: string]: StreamableHTTPServerTransport | SSEServerTransport } = {};
+
+// Map to store storage configurations by session ID
+const sessionConfigs: { [sessionId: string]: StorageConfig } = {};
+
+// Handle POST requests for client-to-server communication
+app.post(
+  "/mcp",
+  async (
+    req: IncomingMessage & { auth?: AuthInfo; body: any },
+    res: ServerResponse<IncomingMessage>
+  ) => {
+    // Check for existing session ID
+    const sessionId = req.headers["mcp-session-id"] as string | undefined;
+    let transport: StreamableHTTPServerTransport;
+
+    if (sessionId && transports[sessionId]) {
+      // Reuse existing transport - ensure it's a StreamableHTTPServerTransport
+      const existingTransport = transports[sessionId];
+      if (!(existingTransport instanceof StreamableHTTPServerTransport)) {
+        res.statusCode = 400;
+        res.end(JSON.stringify({
+          jsonrpc: "2.0",
+          error: {
+            code: -32000,
+            message: "Session is not a StreamableHTTP session",
+          },
+          id: null,
+        }));
+        return;
+      }
+      transport = existingTransport;
+    } else if (!sessionId && isInitializeRequest(req.body)) {
+      // Get storage config from headers
+      // Clients should set "mcp-use-global-directory: true" header to enable global directory mode
+      const useGlobalDirectory = req.headers["mcp-use-global-directory"] === "true";
+      const config: StorageConfig = {
+        useGlobalDirectory,
+      };
+
+      // New initialization request
+      transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => randomUUID(),
+        onsessioninitialized: (sessionId) => {
+          // Store the transport and config by session ID
+          transports[sessionId] = transport;
+          sessionConfigs[sessionId] = config;
+        },
+      });
+
+      // Clean up transport and config when closed
+      transport.onclose = () => {
+        if (transport.sessionId) {
+          delete transports[transport.sessionId];
+          delete sessionConfigs[transport.sessionId];
+        }
+      };
+
+      const server = new McpServer({
+        name: "@pimzino/agentic-tools-mcp",
+        version: getVersion(),
+      });
+
+      // Create tool registry
+      const registry = new ToolRegistry(server, config);
+
+      // Register all tools
+      registry.registerTools([
+        ...createTaskManagementTools(registry),
+        ...createAgentMemoryTools(registry),
+        ...createPromptsTools(registry),
+      ]);
+
+      // Connect to the MCP server
+      await server.connect(transport);
+    } else {
+      // Invalid request
+      res.statusCode = 400;
+      res.end({
+        jsonrpc: "2.0",
+        error: {
+          code: -32000,
+          message: "Bad Request: No valid session ID provided",
+        },
+        id: null,
+      });
+      return;
+    }
+
+    // Handle the request
+    await transport.handleRequest(req, res, req.body);
+  }
+);
+
+// Reusable handler for GET and DELETE requests
+const handleSessionRequest = async (
+  req: express.Request,
+  res: express.Response
+) => {
+  const sessionId = req.headers["mcp-session-id"] as string | undefined;
+  if (!sessionId || !transports[sessionId]) {
+    res.statusCode = 400;
+    res.end("Invalid or missing session ID");
+    return;
+  }
+
+  const transport = transports[sessionId];
+  
+  // Ensure this is a StreamableHTTPServerTransport
+  if (!(transport instanceof StreamableHTTPServerTransport)) {
+    res.statusCode = 400;
+    res.end("Session is not a StreamableHTTP session");
+    return;
+  }
+  
+  await transport.handleRequest(req, res);
+};
+
+// Handle GET requests for server-to-client notifications via SSE
+app.get("/mcp", handleSessionRequest);
+
+// Handle DELETE requests for session termination
+app.delete("/mcp", handleSessionRequest);
+
+// ============================================
+// Backwards compatibility for SSE limited clients
+// ============================================
+
+// Handle SSE connections for older clients
+app.get("/sse", async (req: express.Request, res: express.Response) => {
+  console.log("SSE connection requested (legacy client)");
+  
+  // Get storage config from headers
+  const useGlobalDirectory = req.headers["mcp-use-global-directory"] === "true";
+  const config: StorageConfig = {
+    useGlobalDirectory,
+  };
+
+  // Create SSE transport
+  const transport = new SSEServerTransport("/messages", res);
+  
+  // Store transport and config by session ID
+  transports[transport.sessionId] = transport;
+  sessionConfigs[transport.sessionId] = config;
+  
+  // Clean up on connection close
+  res.on("close", () => {
+    delete transports[transport.sessionId];
+    delete sessionConfigs[transport.sessionId];
+    console.log(`SSE connection closed: ${transport.sessionId}`);
   });
 
-  // Register project management tools
-  server.tool(
-    'list_projects',
-    'Discover and overview all your projects with comprehensive details and progress insights. Perfect for getting a bird\'s-eye view of your work portfolio, tracking project status, and quickly navigating between different initiatives in your workspace with project-specific storage.',
-    {
-      workingDirectory: z.string().describe(getWorkingDirectoryDescription(config))
-    },
-    async ({ workingDirectory }: { workingDirectory: string }) => {
-      try {
-        const storage = await createStorage(workingDirectory, config);
-        const tool = createListProjectsTool(storage);
-        return await tool.handler();
-      } catch (error) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
-          }],
-          isError: true
-        };
-      }
-    }
-  );
+  // Create and connect server
+  const server = new McpServer({
+    name: "@pimzino/agentic-tools-mcp",
+    version: getVersion(),
+  });
 
-  server.tool(
-    'create_project',
-    'Launch new projects with structured organization and detailed documentation. Establishes a solid foundation for task management with Git-trackable project data, enabling seamless collaboration and progress tracking across your development workflow.',
-    {
-      workingDirectory: z.string().describe(getWorkingDirectoryDescription(config)),
-      name: z.string().describe('The name of the new project'),
-      description: z.string().describe('A detailed description of the project')
-    },
-    async ({ workingDirectory, name, description }: { workingDirectory: string; name: string; description: string }) => {
-      try {
-        const storage = await createStorage(workingDirectory, config);
-        const tool = createCreateProjectTool(storage);
-        return await tool.handler({ name, description });
-      } catch (error) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
-          }],
-          isError: true
-        };
-      }
-    }
-  );
+  // Create tool registry
+  const registry = new ToolRegistry(server, config);
 
-  server.tool(
-    'get_project',
-    'Access comprehensive project details including metadata, creation dates, and current status. Essential for project analysis, reporting, and understanding project context when planning tasks or reviewing progress in your development workflow.',
-    {
-      workingDirectory: z.string().describe(getWorkingDirectoryDescription(config)),
-      id: z.string().describe('The unique identifier of the project to retrieve')
-    },
-    async ({ workingDirectory, id }: { workingDirectory: string; id: string }) => {
-      try {
-        const storage = await createStorage(workingDirectory, config);
-        const tool = createGetProjectTool(storage);
-        return await tool.handler({ id });
-      } catch (error) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
-          }],
-          isError: true
-        };
-      }
-    }
-  );
+  // Register all tools
+  registry.registerTools([
+    ...createTaskManagementTools(registry),
+    ...createAgentMemoryTools(registry),
+  ]);
 
-  server.tool(
-    'update_project',
-    'Evolve and refine your project information as requirements change and scope develops. Maintain accurate project documentation with flexible updates to names and descriptions, ensuring your project data stays current and meaningful throughout the development lifecycle.',
-    {
-      workingDirectory: z.string().describe(getWorkingDirectoryDescription(config)),
-      id: z.string().describe('The unique identifier of the project to update'),
-      name: z.string().optional().describe('New name for the project (optional)'),
-      description: z.string().optional().describe('New description for the project (optional)')
-    },
-    async ({ workingDirectory, id, name, description }: { workingDirectory: string; id: string; name?: string; description?: string }) => {
-      try {
-        const storage = await createStorage(workingDirectory, config);
-        const tool = createUpdateProjectTool(storage);
-        return await tool.handler({ id, name, description });
-      } catch (error) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
-          }],
-          isError: true
-        };
-      }
-    }
-  );
+  // Connect to the MCP server
+  await server.connect(transport);
+  
+  console.log(`SSE transport initialized: ${transport.sessionId}`);
+});
 
-  server.tool(
-    'delete_project',
-    'Safely remove completed or obsolete projects from your workspace with built-in confirmation safeguards. Permanently cleans up project data while protecting against accidental deletions, helping maintain an organized and current project portfolio.',
-    {
-      workingDirectory: z.string().describe(getWorkingDirectoryDescription(config)),
-      id: z.string().describe('The unique identifier of the project to delete'),
-      confirm: z.boolean().describe('Must be set to true to confirm deletion (safety measure)')
-    },
-    async ({ workingDirectory, id, confirm }: { workingDirectory: string; id: string; confirm: boolean }) => {
-      try {
-        const storage = await createStorage(workingDirectory, config);
-        const tool = createDeleteProjectTool(storage);
-        return await tool.handler({ id, confirm });
-      } catch (error) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
-          }],
-          isError: true
-        };
-      }
-    }
-  );
+// Handle messages from SSE clients
+app.post("/messages", async (req: express.Request, res: express.Response) => {
+  const sessionId = req.headers["mcp-session-id"] as string | undefined;
+  
+  if (!sessionId || !transports[sessionId]) {
+    res.status(400).json({
+      jsonrpc: "2.0",
+      error: {
+        code: -32000,
+        message: "Invalid or missing session ID",
+      },
+      id: null,
+    });
+    return;
+  }
+  
+  const transport = transports[sessionId];
+  
+  // Ensure this is an SSE transport
+  if (!(transport instanceof SSEServerTransport)) {
+    res.status(400).json({
+      jsonrpc: "2.0",
+      error: {
+        code: -32000,
+        message: "Session is not an SSE session",
+      },
+      id: null,
+    });
+    return;
+  }
+  
+  // Handle the message
+  await transport.handleMessage(req.body);
+  
+  // SSE transport doesn't send responses via POST
+  res.status(200).json({ success: true });
+});
 
-  // Register task management tools
-  server.tool(
-    'list_tasks',
-    'Explore and organize your task portfolio with intelligent filtering and comprehensive progress tracking. View all tasks across projects or focus on specific project tasks, perfect for sprint planning, progress reviews, and maintaining productivity momentum.',
-    {
-      workingDirectory: z.string().describe(getWorkingDirectoryDescription(config)),
-      projectId: z.string().optional().describe('Filter tasks to only those belonging to this project (optional)')
-    },
-    async ({ workingDirectory, projectId }: { workingDirectory: string; projectId?: string }) => {
-      try {
-        const storage = await createStorage(workingDirectory, config);
-        const tool = createListTasksTool(storage);
-        return await tool.handler({ projectId });
-      } catch (error) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
-          }],
-          isError: true
-        };
-      }
-    }
-  );
+// Health check endpoint
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    status: "healthy",
+    version: getVersion(),
+    uptime: process.uptime(),
+    sessions: Object.keys(transports).length
+  });
+});
 
-  server.tool(
-    'create_task',
-    'Transform project goals into actionable, trackable tasks with advanced features including dependencies, priorities, complexity estimation, and workflow management. Build structured workflows that break down complex projects into manageable components.',
-    {
-      workingDirectory: z.string().describe(getWorkingDirectoryDescription(config)),
-      name: z.string().describe('The name/title of the new task'),
-      details: z.string().describe('Detailed description of what the task involves'),
-      projectId: z.string().describe('The ID of the project this task belongs to'),
-      dependsOn: z.array(z.string()).optional().describe('Array of task IDs that must be completed before this task'),
-      priority: z.number().min(1).max(10).optional().describe('Task priority level (1-10, where 10 is highest priority)'),
-      complexity: z.number().min(1).max(10).optional().describe('Estimated complexity/effort (1-10, where 10 is most complex)'),
-      status: z.enum(['pending', 'in-progress', 'blocked', 'done']).optional().describe('Initial task status (defaults to pending)'),
-      tags: z.array(z.string()).optional().describe('Tags for categorization and filtering'),
-      estimatedHours: z.number().min(0).optional().describe('Estimated time to complete in hours')
-    },
-    async ({ workingDirectory, name, details, projectId, dependsOn, priority, complexity, status, tags, estimatedHours }: {
-      workingDirectory: string;
-      name: string;
-      details: string;
-      projectId: string;
-      dependsOn?: string[];
-      priority?: number;
-      complexity?: number;
-      status?: 'pending' | 'in-progress' | 'blocked' | 'done';
-      tags?: string[];
-      estimatedHours?: number;
-    }) => {
-      try {
-        const storage = await createStorage(workingDirectory, config);
-        const tool = createCreateTaskTool(storage);
-        return await tool.handler({ name, details, projectId, dependsOn, priority, complexity, status, tags, estimatedHours });
-      } catch (error) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
-          }],
-          isError: true
-        };
-      }
-    }
-  );
+const PORT = process.env.PORT || 3000;
+const server = app.listen(PORT, () => {
+  console.log(`🌐 HTTP MCP server ready on port ${PORT}`);
+  console.log(`   - Modern clients: POST/GET/DELETE /mcp`);
+  console.log(`   - Legacy SSE clients: GET /sse, POST /messages`);
+});
 
-  server.tool(
-    'get_task',
-    'Deep-dive into task specifics with comprehensive details including progress status, creation history, and full context. Essential for task analysis, status reporting, and understanding dependencies when planning work or conducting progress reviews.',
-    {
-      workingDirectory: z.string().describe(getWorkingDirectoryDescription(config)),
-      id: z.string().describe('The unique identifier of the task to retrieve')
-    },
-    async ({ workingDirectory, id }: { workingDirectory: string; id: string }) => {
-      try {
-        const storage = await createStorage(workingDirectory, config);
-        const tool = createGetTaskTool(storage);
-        return await tool.handler({ id });
-      } catch (error) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
-          }],
-          isError: true
-        };
-      }
+// Graceful shutdown
+process.on("SIGTERM", async () => {
+  console.log("SIGTERM received, shutting down gracefully...");
+  
+  // Close all transports
+  for (const sessionId of Object.keys(transports)) {
+    const transport = transports[sessionId];
+    if (transport && "close" in transport) {
+      await transport.close();
     }
-  );
-
-  server.tool(
-    'update_task',
-    'Adapt and refine tasks with comprehensive updates including dependencies, priorities, complexity, status, tags, and time tracking. Keep your workflow current and accurate with advanced project management capabilities.',
-    {
-      workingDirectory: z.string().describe(getWorkingDirectoryDescription(config)),
-      id: z.string().describe('The unique identifier of the task to update'),
-      name: z.string().optional().describe('New name/title for the task (optional)'),
-      details: z.string().optional().describe('New detailed description for the task (optional)'),
-      completed: z.boolean().optional().describe('Mark task as completed (true) or incomplete (false) (optional)'),
-      dependsOn: z.array(z.string()).optional().describe('Updated array of task IDs that must be completed before this task'),
-      priority: z.number().min(1).max(10).optional().describe('Updated task priority level (1-10, where 10 is highest priority)'),
-      complexity: z.number().min(1).max(10).optional().describe('Updated complexity/effort estimate (1-10, where 10 is most complex)'),
-      status: z.enum(['pending', 'in-progress', 'blocked', 'done']).optional().describe('Updated task status'),
-      tags: z.array(z.string()).optional().describe('Updated tags for categorization and filtering'),
-      estimatedHours: z.number().min(0).optional().describe('Updated estimated time to complete in hours'),
-      actualHours: z.number().min(0).optional().describe('Actual time spent on the task in hours')
-    },
-    async ({ workingDirectory, id, name, details, completed, dependsOn, priority, complexity, status, tags, estimatedHours, actualHours }: {
-      workingDirectory: string;
-      id: string;
-      name?: string;
-      details?: string;
-      completed?: boolean;
-      dependsOn?: string[];
-      priority?: number;
-      complexity?: number;
-      status?: 'pending' | 'in-progress' | 'blocked' | 'done';
-      tags?: string[];
-      estimatedHours?: number;
-      actualHours?: number;
-    }) => {
-      try {
-        const storage = await createStorage(workingDirectory, config);
-        const tool = createUpdateTaskTool(storage);
-        return await tool.handler({ id, name, details, completed, dependsOn, priority, complexity, status, tags, estimatedHours, actualHours });
-      } catch (error) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
-          }],
-          isError: true
-        };
-      }
-    }
-  );
-
-  server.tool(
-    'delete_task',
-    'Streamline your workflow by safely removing obsolete or completed tasks with built-in confirmation protection. Maintain a clean, focused task environment while preventing accidental data loss through required confirmation safeguards.',
-    {
-      workingDirectory: z.string().describe(getWorkingDirectoryDescription(config)),
-      id: z.string().describe('The unique identifier of the task to delete'),
-      confirm: z.boolean().describe('Must be set to true to confirm deletion (safety measure)')
-    },
-    async ({ workingDirectory, id, confirm }: { workingDirectory: string; id: string; confirm: boolean }) => {
-      try {
-        const storage = await createStorage(workingDirectory, config);
-        const tool = createDeleteTaskTool(storage);
-        return await tool.handler({ id, confirm });
-      } catch (error) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
-          }],
-          isError: true
-        };
-      }
-    }
-  );
-
-  // Register subtask management tools
-  server.tool(
-    'list_subtasks',
-    'Navigate your detailed work breakdown with granular subtask visibility and flexible filtering options. Perfect for sprint planning, daily standups, and detailed progress tracking across the complete project hierarchy from high-level goals to specific implementation steps.',
-    {
-      workingDirectory: z.string().describe(getWorkingDirectoryDescription(config)),
-      taskId: z.string().optional().describe('Filter subtasks to only those belonging to this task (optional)'),
-      projectId: z.string().optional().describe('Filter subtasks to only those in this project (optional)')
-    },
-    async ({ workingDirectory, taskId, projectId }: { workingDirectory: string; taskId?: string; projectId?: string }) => {
-      try {
-        const storage = await createStorage(workingDirectory, config);
-        const tool = createListSubtasksTool(storage);
-        return await tool.handler({ taskId, projectId });
-      } catch (error) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
-          }],
-          isError: true
-        };
-      }
-    }
-  );
-
-  server.tool(
-    'create_subtask',
-    'Break down complex tasks into precise, actionable subtasks with detailed specifications and clear ownership. Enable granular progress tracking and team coordination by decomposing work into manageable, measurable components within your hierarchical project structure.',
-    {
-      workingDirectory: z.string().describe(getWorkingDirectoryDescription(config)),
-      name: z.string().describe('The name/title of the new subtask'),
-      details: z.string().describe('Detailed description of what the subtask involves'),
-      taskId: z.string().describe('The ID of the parent task this subtask belongs to')
-    },
-    async ({ workingDirectory, name, details, taskId }: { workingDirectory: string; name: string; details: string; taskId: string }) => {
-      try {
-        const storage = await createStorage(workingDirectory, config);
-        const tool = createCreateSubtaskTool(storage);
-        return await tool.handler({ name, details, taskId });
-      } catch (error) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
-          }],
-          isError: true
-        };
-      }
-    }
-  );
-
-  server.tool(
-    'get_subtask',
-    'Examine subtask details with comprehensive context including parent task relationships, progress status, and implementation specifics. Essential for detailed work planning, progress assessment, and understanding the complete scope of granular work items.',
-    {
-      workingDirectory: z.string().describe(getWorkingDirectoryDescription(config)),
-      id: z.string().describe('The unique identifier of the subtask to retrieve')
-    },
-    async ({ workingDirectory, id }: { workingDirectory: string; id: string }) => {
-      try {
-        const storage = await createStorage(workingDirectory, config);
-        const tool = createGetSubtaskTool(storage);
-        return await tool.handler({ id });
-      } catch (error) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
-          }],
-          isError: true
-        };
-      }
-    }
-  );
-
-  server.tool(
-    'update_subtask',
-    'Fine-tune subtask specifications and track completion progress with flexible updates to names, descriptions, and status. Maintain accurate, up-to-date work records that reflect evolving requirements and real-time progress in your detailed project execution.',
-    {
-      workingDirectory: z.string().describe(getWorkingDirectoryDescription(config)),
-      id: z.string().describe('The unique identifier of the subtask to update'),
-      name: z.string().optional().describe('New name/title for the subtask (optional)'),
-      details: z.string().optional().describe('New detailed description for the subtask (optional)'),
-      completed: z.boolean().optional().describe('Mark subtask as completed (true) or incomplete (false) (optional)')
-    },
-    async ({ workingDirectory, id, name, details, completed }: { workingDirectory: string; id: string; name?: string; details?: string; completed?: boolean }) => {
-      try {
-        const storage = await createStorage(workingDirectory, config);
-        const tool = createUpdateSubtaskTool(storage);
-        return await tool.handler({ id, name, details, completed });
-      } catch (error) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
-          }],
-          isError: true
-        };
-      }
-    }
-  );
-
-  server.tool(
-    'delete_subtask',
-    'Clean up your detailed work breakdown by safely removing completed or obsolete subtasks with confirmation safeguards. Maintain focus on current priorities while preserving data integrity through required confirmation protocols.',
-    {
-      workingDirectory: z.string().describe(getWorkingDirectoryDescription(config)),
-      id: z.string().describe('The unique identifier of the subtask to delete'),
-      confirm: z.boolean().describe('Must be set to true to confirm deletion (safety measure)')
-    },
-    async ({ workingDirectory, id, confirm }: { workingDirectory: string; id: string; confirm: boolean }) => {
-      try {
-        const storage = await createStorage(workingDirectory, config);
-        const tool = createDeleteSubtaskTool(storage);
-        return await tool.handler({ id, confirm });
-      } catch (error) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
-          }],
-          isError: true
-        };
-      }
-    }
-  );
-
-  // Register agent memory management tools
-  server.tool(
-    'create_memory',
-    'Capture and preserve important information, insights, or context as searchable memories with intelligent file-based storage. Ideal for building a knowledge base of user preferences, technical decisions, project context, or any information you want to remember and retrieve later with organized categorization.',
-    {
-      workingDirectory: z.string().describe(getWorkingDirectoryDescription(config)),
-      title: z.string().describe('Short title for the memory (max 50 characters for better file organization)'),
-      content: z.string().describe('Detailed memory content/text (no character limit)'),
-      metadata: z.record(z.any()).optional().describe('Optional metadata as key-value pairs for additional context'),
-      category: z.string().optional().describe('Optional category to organize memories (e.g., "user_preferences", "project_context")')
-    },
-    async ({ workingDirectory, title, content, metadata, category }: {
-      workingDirectory: string;
-      title: string;
-      content: string;
-      metadata?: Record<string, any>;
-      category?: string;
-    }) => {
-      try {
-        const storage = await createMemoryStorage(workingDirectory, config);
-        const tool = createCreateMemoryTool(storage);
-        return await tool.handler({ title, content, metadata, category });
-      } catch (error) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
-          }],
-          isError: true
-        };
-      }
-    }
-  );
-
-  server.tool(
-    'search_memories',
-    'Intelligently search through your stored memories using advanced text matching algorithms to quickly find relevant information. Features multi-field search across titles, content, and metadata with customizable relevance scoring - perfect for retrieving past decisions, preferences, or contextual information when you need it most.',
-    {
-      workingDirectory: z.string().describe(getWorkingDirectoryDescription(config)),
-      query: z.string().describe('The search query text to find matching memories'),
-      limit: z.number().min(1).max(100).optional().describe('Maximum number of results to return (default: 10)'),
-      threshold: z.number().min(0).max(1).optional().describe('Minimum relevance threshold 0-1 (default: 0.3)'),
-      category: z.string().optional().describe('Filter results to memories in this specific category')
-    },
-    async ({ workingDirectory, query, limit, threshold, category }: {
-      workingDirectory: string;
-      query: string;
-      limit?: number;
-      threshold?: number;
-      category?: string;
-    }) => {
-      try {
-        const storage = await createMemoryStorage(workingDirectory, config);
-        const tool = createSearchMemoriesTool(storage);
-        return await tool.handler({ query, limit, threshold, category });
-      } catch (error) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
-          }],
-          isError: true
-        };
-      }
-    }
-  );
-
-  server.tool(
-    'get_memory',
-    'Access comprehensive memory details including full content, metadata, creation history, and categorization. Essential for reviewing stored knowledge, understanding context, and retrieving complete information when making decisions or referencing past insights.',
-    {
-      workingDirectory: z.string().describe(getWorkingDirectoryDescription(config)),
-      id: z.string().describe('The unique identifier of the memory to retrieve')
-    },
-    async ({ workingDirectory, id }: { workingDirectory: string; id: string }) => {
-      try {
-        const storage = await createMemoryStorage(workingDirectory, config);
-        const tool = createGetMemoryTool(storage);
-        return await tool.handler({ id });
-      } catch (error) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
-          }],
-          isError: true
-        };
-      }
-    }
-  );
-
-  server.tool(
-    'list_memories',
-    'Browse and explore your knowledge repository with organized memory listings and flexible category filtering. Perfect for reviewing stored information, discovering patterns in your knowledge base, and maintaining awareness of your accumulated insights and decisions.',
-    {
-      workingDirectory: z.string().describe(getWorkingDirectoryDescription(config)),
-      category: z.string().optional().describe('Filter to memories in this specific category'),
-      limit: z.number().min(1).max(1000).optional().describe('Maximum number of memories to return (default: 50)')
-    },
-    async ({ workingDirectory, category, limit }: {
-      workingDirectory: string;
-      category?: string;
-      limit?: number;
-    }) => {
-      try {
-        const storage = await createMemoryStorage(workingDirectory, config);
-        const tool = createListMemoriesTool(storage);
-        return await tool.handler({ category, limit });
-      } catch (error) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
-          }],
-          isError: true
-        };
-      }
-    }
-  );
-
-  server.tool(
-    'update_memory',
-    'Evolve and refine your stored knowledge with flexible updates to content, categorization, and metadata. Keep your memory repository current and accurate as understanding deepens, ensuring your knowledge base remains a reliable source of up-to-date insights and decisions.',
-    {
-      workingDirectory: z.string().describe(getWorkingDirectoryDescription(config)),
-      id: z.string().describe('The unique identifier of the memory to update'),
-      title: z.string().optional().describe('New title for the memory (max 50 characters for better file organization)'),
-      content: z.string().optional().describe('New detailed content for the memory (no character limit)'),
-      metadata: z.record(z.any()).optional().describe('New metadata as key-value pairs (replaces existing metadata)'),
-      category: z.string().optional().describe('New category for organizing the memory')
-    },
-    async ({ workingDirectory, id, title, content, metadata, category }: {
-      workingDirectory: string;
-      id: string;
-      title?: string;
-      content?: string;
-      metadata?: Record<string, any>;
-      category?: string;
-    }) => {
-      try {
-        const storage = await createMemoryStorage(workingDirectory, config);
-        const tool = createUpdateMemoryTool(storage);
-        return await tool.handler({ id, title, content, metadata, category });
-      } catch (error) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
-          }],
-          isError: true
-        };
-      }
-    }
-  );
-
-  server.tool(
-    'delete_memory',
-    'Safely remove outdated or irrelevant memories from your knowledge repository with built-in confirmation safeguards. Maintain a clean, focused memory collection while protecting against accidental loss of valuable information through required confirmation protocols.',
-    {
-      workingDirectory: z.string().describe(getWorkingDirectoryDescription(config)),
-      id: z.string().describe('The unique identifier of the memory to delete'),
-      confirm: z.boolean().describe('Must be set to true to confirm deletion (safety measure)')
-    },
-    async ({ workingDirectory, id, confirm }: { workingDirectory: string; id: string; confirm: boolean }) => {
-      try {
-        const storage = await createMemoryStorage(workingDirectory, config);
-        const tool = createDeleteMemoryTool(storage);
-        return await tool.handler({ id, confirm });
-      } catch (error) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
-          }],
-          isError: true
-        };
-      }
-    }
-  );
-
-  // Register advanced task management tools
-  server.tool(
-    'parse_prd',
-    'Parse a Product Requirements Document (PRD) and automatically generate structured tasks with dependencies, priorities, and complexity estimates. Transform high-level requirements into actionable task breakdowns with intelligent analysis.',
-    {
-      workingDirectory: z.string().describe(getWorkingDirectoryDescription(config)),
-      projectId: z.string().describe('ID of the project to add tasks to'),
-      prdContent: z.string().describe('Content of the Product Requirements Document to parse'),
-      generateSubtasks: z.boolean().optional().default(true).describe('Whether to generate subtasks for complex tasks'),
-      defaultPriority: z.number().min(1).max(10).optional().default(5).describe('Default priority for generated tasks (1-10)'),
-      estimateComplexity: z.boolean().optional().default(true).describe('Whether to estimate complexity for tasks')
-    },
-    async ({ workingDirectory, projectId, prdContent, generateSubtasks, defaultPriority, estimateComplexity }: {
-      workingDirectory: string;
-      projectId: string;
-      prdContent: string;
-      generateSubtasks?: boolean;
-      defaultPriority?: number;
-      estimateComplexity?: boolean;
-    }) => {
-      try {
-        const storage = await createStorage(workingDirectory, config);
-        const tool = createParsePRDTool(storage, getWorkingDirectoryDescription, config);
-        return await tool.handler({ workingDirectory, projectId, prdContent, generateSubtasks, defaultPriority, estimateComplexity });
-      } catch (error) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
-          }],
-          isError: true
-        };
-      }
-    }
-  );
-
-  server.tool(
-    'get_next_task_recommendation',
-    'Get intelligent recommendations for the next task to work on based on dependencies, priorities, complexity, and current project status. Smart task recommendation engine for optimal workflow management and productivity.',
-    {
-      workingDirectory: z.string().describe(getWorkingDirectoryDescription(config)),
-      projectId: z.string().optional().describe('Filter recommendations to a specific project'),
-      maxRecommendations: z.number().min(1).max(10).optional().default(3).describe('Maximum number of task recommendations to return'),
-      considerComplexity: z.boolean().optional().default(true).describe('Whether to factor in task complexity for recommendations'),
-      preferredTags: z.array(z.string()).optional().describe('Preferred task tags to prioritize in recommendations'),
-      excludeBlocked: z.boolean().optional().default(true).describe('Whether to exclude blocked tasks from recommendations')
-    },
-    async ({ workingDirectory, projectId, maxRecommendations, considerComplexity, preferredTags, excludeBlocked }: {
-      workingDirectory: string;
-      projectId?: string;
-      maxRecommendations?: number;
-      considerComplexity?: boolean;
-      preferredTags?: string[];
-      excludeBlocked?: boolean;
-    }) => {
-      try {
-        const storage = await createStorage(workingDirectory, config);
-        const tool = createNextTaskRecommendationTool(storage, getWorkingDirectoryDescription, config);
-        return await tool.handler({ workingDirectory, projectId, maxRecommendations, considerComplexity, preferredTags, excludeBlocked });
-      } catch (error) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
-          }],
-          isError: true
-        };
-      }
-    }
-  );
-
-  server.tool(
-    'analyze_task_complexity',
-    'Analyze task complexity and suggest breaking down overly complex tasks into smaller, manageable subtasks. Intelligent complexity analysis to identify tasks that should be split for better productivity and progress tracking.',
-    {
-      workingDirectory: z.string().describe(getWorkingDirectoryDescription(config)),
-      taskId: z.string().optional().describe('Specific task ID to analyze (if not provided, analyzes all tasks)'),
-      projectId: z.string().optional().describe('Filter analysis to a specific project'),
-      complexityThreshold: z.number().min(1).max(10).optional().default(7).describe('Complexity threshold above which tasks should be broken down'),
-      suggestBreakdown: z.boolean().optional().default(true).describe('Whether to suggest specific task breakdowns'),
-      autoCreateSubtasks: z.boolean().optional().default(false).describe('Whether to automatically create suggested subtasks')
-    },
-    async ({ workingDirectory, taskId, projectId, complexityThreshold, suggestBreakdown, autoCreateSubtasks }: {
-      workingDirectory: string;
-      taskId?: string;
-      projectId?: string;
-      complexityThreshold?: number;
-      suggestBreakdown?: boolean;
-      autoCreateSubtasks?: boolean;
-    }) => {
-      try {
-        const storage = await createStorage(workingDirectory, config);
-        const tool = createComplexityAnalysisTool(storage, getWorkingDirectoryDescription, config);
-        return await tool.handler({ workingDirectory, taskId, projectId, complexityThreshold, suggestBreakdown, autoCreateSubtasks });
-      } catch (error) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
-          }],
-          isError: true
-        };
-      }
-    }
-  );
-
-  server.tool(
-    'infer_task_progress',
-    'Analyze the codebase to infer which tasks appear to be completed based on code changes, file creation, and implementation evidence. Intelligent progress inference to automatically track task completion from code analysis.',
-    {
-      workingDirectory: z.string().describe(getWorkingDirectoryDescription(config)),
-      projectId: z.string().optional().describe('Filter analysis to a specific project'),
-      scanDepth: z.number().min(1).max(5).optional().default(3).describe('Directory depth to scan for code files'),
-      fileExtensions: z.array(z.string()).optional().default(['.js', '.ts', '.jsx', '.tsx', '.py', '.java', '.cs', '.go', '.rs']).describe('File extensions to analyze'),
-      autoUpdateTasks: z.boolean().optional().default(false).describe('Whether to automatically update task status based on inference'),
-      confidenceThreshold: z.number().min(0).max(1).optional().default(0.7).describe('Confidence threshold for auto-updating tasks (0-1)')
-    },
-    async ({ workingDirectory, projectId, scanDepth, fileExtensions, autoUpdateTasks, confidenceThreshold }: {
-      workingDirectory: string;
-      projectId?: string;
-      scanDepth?: number;
-      fileExtensions?: string[];
-      autoUpdateTasks?: boolean;
-      confidenceThreshold?: number;
-    }) => {
-      try {
-        const storage = await createStorage(workingDirectory, config);
-        const tool = createProgressInferenceTool(storage, getWorkingDirectoryDescription, config);
-        return await tool.handler({ workingDirectory, projectId, scanDepth, fileExtensions, autoUpdateTasks, confidenceThreshold });
-      } catch (error) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
-          }],
-          isError: true
-        };
-      }
-    }
-  );
-
-  // Register research tools (hybrid web + memory approach)
-  server.tool(
-    'research_task',
-    'Guide the AI agent to perform comprehensive web research for a task, with intelligent research suggestions and automatic memory storage of findings. Combines web research capabilities with local knowledge caching for optimal research workflow.',
-    {
-      workingDirectory: z.string().describe(getWorkingDirectoryDescription(config)),
-      taskId: z.string().describe('ID of the task to research'),
-      researchAreas: z.array(z.string()).optional().describe('Specific areas to research (auto-generated if not provided)'),
-      saveToMemories: z.boolean().optional().default(true).describe('Whether to save research findings to memories'),
-      checkExistingMemories: z.boolean().optional().default(true).describe('Whether to check existing memories first'),
-      researchDepth: z.enum(['quick', 'standard', 'comprehensive']).optional().default('standard').describe('Depth of research to perform')
-    },
-    async ({ workingDirectory, taskId, researchAreas, saveToMemories, checkExistingMemories, researchDepth }: {
-      workingDirectory: string;
-      taskId: string;
-      researchAreas?: string[];
-      saveToMemories?: boolean;
-      checkExistingMemories?: boolean;
-      researchDepth?: 'quick' | 'standard' | 'comprehensive';
-    }) => {
-      try {
-        const storage = await createStorage(workingDirectory, config);
-        const memoryStorage = await createMemoryStorage(workingDirectory, config);
-        const tool = createTaskResearchTool(storage, memoryStorage, getWorkingDirectoryDescription, config);
-        return await tool.handler({ workingDirectory, taskId, researchAreas, saveToMemories, checkExistingMemories, researchDepth });
-      } catch (error) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
-          }],
-          isError: true
-        };
-      }
-    }
-  );
-
-  server.tool(
-    'generate_research_queries',
-    'Generate intelligent, targeted web search queries for task research. Provides structured search strategies to help AI agents find the most relevant information efficiently with optimized search terms and techniques.',
-    {
-      workingDirectory: z.string().describe(getWorkingDirectoryDescription(config)),
-      taskId: z.string().describe('ID of the task to generate research queries for'),
-      queryTypes: z.array(z.enum(['implementation', 'best_practices', 'troubleshooting', 'alternatives', 'performance', 'security', 'examples', 'tools'])).optional().describe('Types of queries to generate'),
-      includeAdvanced: z.boolean().optional().default(false).describe('Include advanced search operators and techniques'),
-      targetYear: z.number().optional().default(new Date().getFullYear()).describe('Target year for recent information (default: current year)')
-    },
-    async ({ workingDirectory, taskId, queryTypes, includeAdvanced, targetYear }: {
-      workingDirectory: string;
-      taskId: string;
-      queryTypes?: string[];
-      includeAdvanced?: boolean;
-      targetYear?: number;
-    }) => {
-      try {
-        const storage = await createStorage(workingDirectory, config);
-        const tool = createResearchQueriesGeneratorTool(storage, getWorkingDirectoryDescription, config);
-        return await tool.handler({ workingDirectory, taskId, queryTypes, includeAdvanced, targetYear });
-      } catch (error) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
-          }],
-          isError: true
-        };
-      }
-    }
-  );
-
-  return server;
-}
+  }
+  
+  // Close the server
+  server.close(() => {
+    console.log("Server closed");
+    process.exit(0);
+  });
+});

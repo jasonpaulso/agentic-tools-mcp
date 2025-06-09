@@ -1,0 +1,64 @@
+# Node modules
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build output (we build inside Docker)
+dist/
+
+# Development files
+.eslintrc*
+.prettierrc*
+
+# Version control
+.git/
+.gitignore
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker files
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Documentation (except those we explicitly copy)
+*.md
+!README.md
+!LICENSE
+
+# Test files
+**/*.test.js
+**/*.spec.js
+test/
+tests/
+__tests__/
+
+# Local storage data
+.agentic-tools-mcp/
+data/
+
+# Logs
+logs/
+*.log
+
+# Environment files
+.env
+.env.*
+
+# Coverage
+coverage/
+.nyc_output/
+
+# Temporary files
+tmp/
+temp/

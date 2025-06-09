@@ -22,7 +22,7 @@ This MCP server provides advanced task management and agent memory capabilities 
 
 ### Core Structure
 - **Entry Point**: `src/index.ts` - Starts the HTTP server
-- **HTTP Server**: `src/streamable-server.ts` - Express-based HTTP MCP server with dual transport support
+- **HTTP Server**: `src/server.ts` - Express-based HTTP MCP server with dual transport support
 - **Legacy STDIO Server**: `src/server.ts` - Original STDIO-based MCP server (still available for reference)
 - **Storage Config**: `src/utils/storage-config.ts` - Handles --claude flag for global vs project-specific storage
 - **Tool Registry**: `src/tools/registry.ts` - Modular tool management system

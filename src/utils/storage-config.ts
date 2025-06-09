@@ -1,5 +1,6 @@
 import { homedir } from 'os';
 import { join } from 'path';
+import { pathTranslator } from './path-translator.js';
 
 /**
  * Configuration for storage directory resolution
@@ -43,7 +44,15 @@ export function resolveWorkingDirectory(providedPath: string, config: StorageCon
     return getGlobalStorageDirectory();
   }
   
-  return providedPath;
+  // Apply path translation if running in Docker
+  const translatedPath = pathTranslator.toContainerPath(providedPath);
+  
+  // Log translation for debugging if enabled
+  if (pathTranslator.isEnabled() && translatedPath !== providedPath) {
+    console.log(`Path translation: ${providedPath} -> ${translatedPath}`);
+  }
+  
+  return translatedPath;
 }
 
 /**

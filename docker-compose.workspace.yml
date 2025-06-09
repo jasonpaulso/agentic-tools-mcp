@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  agentic-tools-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: agentic-tools-mcp:latest
+    container_name: agentic-tools-mcp
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      # Map host paths to container paths
+      - PATH_MAPPING=/workspace:/workspace,/Users:/Users
+    volumes:
+      # Map your workspace directory
+      - /Users/jasonschulz/Developer:/workspace/Developer:ro
+      # Or map entire home directory (be careful with permissions)
+      # - /Users/jasonschulz:/Users/jasonschulz:ro
+      
+      # Storage volumes
+      - ./data:/app/.agentic-tools-mcp
+      - ~/.agentic-tools-mcp:/data/.agentic-tools-mcp
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1); }).on('error', () => { process.exit(1); })"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
