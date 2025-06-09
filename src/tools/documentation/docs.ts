@@ -6,6 +6,8 @@ import { DualDocStorage } from '../../features/documentation/storage/dual-storag
 import { WebScraper } from '../../features/documentation/scrapers/web-scraper.js';
 import { Document } from '../../features/documentation/models/index.js';
 import { randomUUID } from 'crypto';
+import { SyncDocsTool } from '../../features/documentation/tools/docs/sync.js';
+import { UpdateDocsTool } from '../../features/documentation/tools/docs/update.js';
 
 export function createDocumentationTools(registry: ToolRegistry): ToolDefinition[] {
   const config = registry.config;
@@ -323,6 +325,67 @@ export function createDocumentationTools(registry: ToolRegistry): ToolDefinition
           };
         }
       }
-    )
+    ),
+
+    // Sync Documentation
+    (() => {
+      const tool = new SyncDocsTool();
+      return createTool(
+        tool.definition.name,
+        tool.definition.description,
+        tool.definition.inputSchema,
+        (input) => tool.execute(input).then(result => ({
+          content: [{
+            type: 'text' as const,
+            text: result.message + (result.details && result.details.length > 0 ? '\n\nDetails:\n' + result.details.join('\n') : '')
+          }],
+          isError: !result.success
+        }))
+      );
+    })(),
+
+    // Update Documentation  
+    (() => {
+      const tool = new UpdateDocsTool();
+      return createTool(
+        tool.definition.name,
+        tool.definition.description,
+        tool.definition.inputSchema,
+        (input) => tool.execute(input).then(result => {
+          let text = result.message;
+          
+          if (result.outdated && result.outdated.length > 0) {
+            text += '\n\nOutdated documentation:';
+            result.outdated.forEach((item, index) => {
+              text += `\n${index + 1}. ${item.library}@${item.version} (${item.storage})`;
+              text += `\n   ${item.needsUpdate}`;
+              if (item.url) text += `\n   URL: ${item.url}`;
+            });
+          }
+          
+          if (result.updated && result.updated.length > 0) {
+            text += '\n\nUpdated:';
+            result.updated.forEach(item => {
+              text += `\n- ${item}`;
+            });
+          }
+          
+          if (result.errors && result.errors.length > 0) {
+            text += '\n\nErrors:';
+            result.errors.forEach(error => {
+              text += `\n- ${error}`;
+            });
+          }
+          
+          return {
+            content: [{
+              type: 'text' as const,
+              text
+            }],
+            isError: !result.success
+          };
+        })
+      );
+    })()
   ];
 }

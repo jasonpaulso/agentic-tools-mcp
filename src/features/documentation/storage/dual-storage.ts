@@ -4,6 +4,7 @@ import { DualDocumentStorage, DocumentStorage, DocumentSearchResult } from './st
 import { DocFileStorage } from './doc-file-storage.js';
 import { Document } from '../models/index.js';
 import { getGlobalStorageDirectory, StorageConfig } from '../../../utils/storage-config.js';
+import { isVersionCompatible, findBestVersion } from '../utils/version-utils.js';
 
 /**
  * Dual storage implementation that manages both project and global documentation
@@ -51,25 +52,65 @@ export class DualDocStorage implements DualDocumentStorage {
    * Get document with fallback from project to global storage
    */
   async getDocument(library: string, version: string): Promise<Document | null> {
-    // 1. Check project storage first
-    const projectDoc = await this.project.getDocument(library, version);
-    if (projectDoc && this.isVersionCompatible(projectDoc.version, version)) {
+    // 1. Try exact version match in project storage first
+    let projectDoc = await this.project.getDocument(library, version);
+    if (projectDoc) {
       return projectDoc;
     }
+
+    // 2. Try to find a compatible version in project storage
+    const projectLibraries = await this.project.getLibraries();
+    const projectLibrary = projectLibraries.find(lib => lib.name === library);
     
-    // 2. Check global storage
-    const globalDoc = await this.global.getDocument(library, version);
+    if (projectLibrary && projectLibrary.versions.length > 0) {
+      const bestVersion = findBestVersion(projectLibrary.versions, version);
+      if (bestVersion) {
+        projectDoc = await this.project.getDocument(library, bestVersion);
+        if (projectDoc) {
+          return projectDoc;
+        }
+      }
+    }
+    
+    // 3. Try exact version match in global storage
+    let globalDoc = await this.global.getDocument(library, version);
     if (globalDoc) {
       // Copy to project storage for offline access
-      await this.project.saveDocument({
-        ...globalDoc,
-        id: globalDoc.id + '_project', // Ensure unique ID in project storage
-        projectId: 'current' // Mark as project-specific copy
-      });
+      await this.copyToProjectStorage(globalDoc);
       return globalDoc;
+    }
+
+    // 4. Try to find a compatible version in global storage
+    const globalLibraries = await this.global.getLibraries();
+    const globalLibrary = globalLibraries.find(lib => lib.name === library);
+    
+    if (globalLibrary && globalLibrary.versions.length > 0) {
+      const bestVersion = findBestVersion(globalLibrary.versions, version);
+      if (bestVersion) {
+        globalDoc = await this.global.getDocument(library, bestVersion);
+        if (globalDoc) {
+          // Copy to project storage for offline access
+          await this.copyToProjectStorage(globalDoc);
+          return globalDoc;
+        }
+      }
     }
     
     return null;
+  }
+
+  /**
+   * Copy a document from global to project storage
+   */
+  private async copyToProjectStorage(doc: Document): Promise<void> {
+    // Check if already exists in project storage
+    const existing = await this.project.getDocument(doc.library, doc.version);
+    if (!existing) {
+      await this.project.saveDocument({
+        ...doc,
+        projectId: 'current' // Mark as project-specific copy
+      });
+    }
   }
 
   /**
@@ -100,14 +141,6 @@ export class DualDocStorage implements DualDocumentStorage {
     return merged.slice(0, limit);
   }
 
-  /**
-   * Check if a stored version is compatible with the requested version
-   */
-  private isVersionCompatible(stored: string, requested: string): boolean {
-    // Simple exact match for now
-    // TODO: Implement semver-like comparison
-    return stored === requested || requested === 'latest';
-  }
 
   /**
    * Sync project documentation with global cache
