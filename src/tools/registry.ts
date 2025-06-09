@@ -1,7 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from "zod";
 import { FileStorage as MemoryFileStorage } from '../features/agent-memories/storage/file-storage.js';
-import { FileStorage as PromptsFileStorage } from '../features/prompts/storage/file-storage.js';
 import { FileStorage } from '../features/task-management/storage/file-storage.js';
 import { resolveWorkingDirectory, StorageConfig } from '../utils/storage-config.js';
 import { ToolDefinition } from './base-tool.js';
@@ -65,13 +64,4 @@ export class ToolRegistry {
     return storage;
   }
 
-  /**
-   * Create prompt storage instance
-   */
-  async createPromptStorage(workingDirectory: string): Promise<PromptsFileStorage> {
-    const resolvedDirectory = resolveWorkingDirectory(workingDirectory, this.config);
-    const storage = new PromptsFileStorage(resolvedDirectory);
-    await storage.initialize();
-    return storage;
-  }
 }

@@ -8,18 +8,20 @@
  *   the "mcp-use-global-directory: true" header in the initial request
  * - Otherwise, project-specific storage will be used (default)
  */
-import 'dotenv/config';
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
+import "dotenv/config";
 import express from "express";
 import { IncomingMessage, ServerResponse } from "http";
 import { randomUUID } from "node:crypto";
 import { createAgentMemoryTools } from "./tools/agent-memories/index.js";
+import { createDocumentationTools } from "./tools/documentation/index.js";
 import { ToolRegistry } from "./tools/registry.js";
 import { createTaskManagementTools } from "./tools/task-management/index.js";
-import { createDocumentationTools } from "./tools/documentation/index.js";
+import { PromptRegistry } from "./features/prompts/registry.js";
+import { registerPrompts } from "./prompts/index.js";
 import { StorageConfig } from "./utils/storage-config.js";
 import { getVersion } from "./utils/version.js";
 
@@ -95,6 +97,10 @@ app.post(
         ...createAgentMemoryTools(registry),
         ...createDocumentationTools(registry),
       ]);
+
+      // Create prompt registry and register all prompts
+      const promptRegistry = new PromptRegistry(server, config);
+      registerPrompts(promptRegistry);
 
 
       // Connect to the MCP server
