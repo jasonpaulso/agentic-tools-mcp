@@ -11,7 +11,7 @@ import { PromptsStorage } from './storage.js';
 export class FileStorage implements PromptsStorage {
   private promptsDir: string;
 
-  constructor(private workingDirectory: string) {
+  constructor(workingDirectory: string) {
     this.promptsDir = path.join(workingDirectory, '.agentic-tools-mcp', 'prompts');
   }
 
