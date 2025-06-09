@@ -1,5 +1,5 @@
 /**
- * HTTP-based MCP server for Agentic Tools
+ * HTTP-based MCP server for Agentic Tools with Prompts support
  * 
  * This server uses StreamableHTTPServerTransport to provide MCP functionality over HTTP.
  * 
@@ -15,12 +15,15 @@ import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import express from "express";
 import { IncomingMessage, ServerResponse } from "http";
 import { randomUUID } from "node:crypto";
+import { z } from "zod";
 import { StorageConfig } from "./utils/storage-config.js";
 import { getVersion } from "./utils/version.js";
 import { ToolRegistry } from "./tools/registry.js";
 import { createTaskManagementTools } from "./tools/task-management/index.js";
 import { createAgentMemoryTools } from "./tools/agent-memories/index.js";
-import { createPromptsTools } from "./tools/prompts/index.js";
+import { SYSTEM_PROMPTS } from "./features/prompts/system-prompts.js";
+import { FileStorage as PromptsFileStorage } from "./features/prompts/storage/file-storage.js";
+import { resolveWorkingDirectory } from "./utils/storage-config.js";
 
 const app = express();
 app.use(express.json());
@@ -74,6 +77,11 @@ app.post(
       const server = new McpServer({
         name: "@pimzino/agentic-tools-mcp",
         version: getVersion(),
+      }, {
+        capabilities: {
+          prompts: {},
+          tools: {},
+        },
       });
 
       // Create tool registry
@@ -83,8 +91,111 @@ app.post(
       registry.registerTools([
         ...createTaskManagementTools(registry),
         ...createAgentMemoryTools(registry),
-        ...createPromptsTools(registry),
       ]);
+
+      // Setup prompts storage
+      const createPromptStorage = async (workingDirectory: string): Promise<PromptsFileStorage> => {
+        const resolvedDirectory = resolveWorkingDirectory(workingDirectory, config);
+        const storage = new PromptsFileStorage(resolvedDirectory);
+        await storage.initialize();
+        return storage;
+      };
+
+      // Initialize system prompts
+      const workingDirectory = config.useGlobalDirectory ? '~' : process.cwd();
+      const promptStorage = await createPromptStorage(workingDirectory);
+      
+      // Check if prompts are already initialized
+      const existingPrompts = await promptStorage.listPrompts();
+      if (existingPrompts.length === 0) {
+        for (const systemPrompt of SYSTEM_PROMPTS) {
+          await promptStorage.createPrompt(systemPrompt);
+        }
+      }
+
+      // Register prompts with McpServer
+      const allPrompts = await promptStorage.listPrompts();
+      for (const prompt of allPrompts) {
+        // Build argument schema dynamically
+        const argsSchema: Record<string, any> = {};
+        for (const arg of prompt.arguments) {
+          if (arg.required) {
+            argsSchema[arg.name] = z.string().describe(arg.description);
+          } else {
+            argsSchema[arg.name] = z.string().optional().describe(arg.description);
+          }
+        }
+
+        // Register the prompt
+        server.prompt(
+          prompt.name,
+          prompt.description,
+          argsSchema,
+          async (args) => {
+            // Process arguments with defaults
+            const finalArgs: Record<string, any> = {};
+            for (const arg of prompt.arguments) {
+              if (args[arg.name] !== undefined) {
+                finalArgs[arg.name] = args[arg.name];
+              } else if (arg.default !== undefined) {
+                finalArgs[arg.name] = arg.default;
+              }
+            }
+
+            // Generate messages
+            const messages: any[] = [];
+            
+            if (prompt.template) {
+              // Process template
+              let processedTemplate = prompt.template;
+              
+              // Simple variable substitution
+              for (const [key, value] of Object.entries(finalArgs)) {
+                const regex = new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, 'g');
+                processedTemplate = processedTemplate.replace(regex, String(value));
+              }
+              
+              // Handle conditional blocks
+              processedTemplate = processedTemplate.replace(
+                /\{\{#if\s+(\w+)\}\}(.*?)\{\{\/if\}\}/gs,
+                (_match, varName, content) => {
+                  return finalArgs[varName] ? content : '';
+                }
+              );
+              
+              messages.push({
+                role: 'user',
+                content: {
+                  type: 'text',
+                  text: processedTemplate.trim(),
+                },
+              });
+            } else if (prompt.messages) {
+              // Use predefined messages
+              for (const msg of prompt.messages) {
+                if (msg.content.text) {
+                  let processedText = msg.content.text;
+                  for (const [key, value] of Object.entries(finalArgs)) {
+                    const regex = new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, 'g');
+                    processedText = processedText.replace(regex, String(value));
+                  }
+                  messages.push({
+                    role: msg.role,
+                    content: {
+                      type: 'text',
+                      text: processedText,
+                    },
+                  });
+                } else {
+                  messages.push(msg);
+                }
+              }
+            }
+            
+            return { messages };
+          }
+        );
+      }
 
       // Connect to the MCP server
       await server.connect(transport);
