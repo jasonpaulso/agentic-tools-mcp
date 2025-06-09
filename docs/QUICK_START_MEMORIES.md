@@ -3,17 +3,10 @@
 Get started with the Agent Memories feature in just a few minutes!
 
 ## Prerequisites
-
+<!-- todo: update these for docker setup -->
 - Node.js 18+ installed
 - Agentic Tools MCP Server v1.2.0+
 - MCP-compatible client (Claude Desktop, AugmentCode, etc.)
-
-## Installation
-
-```bash
-# Install or update to latest version
-npx -y @pimzino/agentic-tools-mcp
-```
 
 ## Basic Usage
 
