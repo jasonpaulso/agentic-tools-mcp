@@ -1,5 +1,5 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { ToolDefinition, ToolConfig } from './base-tool.js';
+import { ToolDefinition } from './base-tool.js';
 import { StorageConfig } from '../utils/storage-config.js';
 import { FileStorage } from '../features/task-management/storage/file-storage.js';
 import { FileStorage as MemoryFileStorage } from '../features/agent-memories/storage/file-storage.js';
