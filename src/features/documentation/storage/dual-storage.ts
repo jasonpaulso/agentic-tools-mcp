@@ -32,8 +32,14 @@ export class DualDocStorage implements DualDocumentStorage {
       };
     }
     
+    // Check if running in Docker by looking for the /data mount
+    const isDocker = process.env.PATH_MAPPING || process.platform === 'linux';
+    const globalBaseDir = isDocker && process.env.PATH_MAPPING
+      ? '/data/.agentic-tools-mcp'  // Use the mounted volume in Docker
+      : join(homedir(), '.agentic-tools-mcp');  // Use home directory locally
+    
     return {
-      globalPath: join(homedir(), '.agentic-tools-mcp', 'global-docs'),
+      globalPath: join(globalBaseDir, 'global-docs'),
       projectPath: join(workingDirectory, '.agentic-tools-mcp', 'docs')
     };
   }

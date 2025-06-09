@@ -3,6 +3,7 @@ import { join, dirname } from 'path';
 import { randomUUID } from 'crypto';
 import { DocumentStorage, DocumentSearchResult, DocumentStorageStats } from './storage.js';
 import { Document, Library } from '../models/index.js';
+import { DocumentSearchEngine } from '../search/index.js';
 
 /**
  * File-based storage implementation for documentation
@@ -12,11 +13,13 @@ export class DocFileStorage implements DocumentStorage {
   private basePath: string;
   private docsDir: string;
   private librariesDir: string;
+  private searchEngine: DocumentSearchEngine;
 
   constructor(basePath: string) {
     this.basePath = basePath;
     this.docsDir = join(basePath, 'documents');
     this.librariesDir = join(basePath, 'libraries');
+    this.searchEngine = new DocumentSearchEngine();
   }
 
   /**
@@ -225,13 +228,12 @@ export class DocFileStorage implements DocumentStorage {
   }
 
   /**
-   * Search documents
+   * Search documents using enhanced search engine
    */
   async searchDocuments(query: string, limit: number = 10): Promise<DocumentSearchResult[]> {
-    const results: DocumentSearchResult[] = [];
-    const queryLower = query.toLowerCase();
-
     try {
+      // Collect all documents
+      const documents: Document[] = [];
       const libraries = await fs.readdir(this.docsDir, { withFileTypes: true });
 
       for (const library of libraries) {
@@ -245,37 +247,7 @@ export class DocFileStorage implements DocumentStorage {
               try {
                 const content = await fs.readFile(filePath, 'utf-8');
                 const doc: Document = JSON.parse(content);
-
-                // Search in various fields
-                const titleMatch = doc.metadata.title?.toLowerCase().includes(queryLower) || false;
-                const descMatch = doc.metadata.description?.toLowerCase().includes(queryLower) || false;
-                const contentMatch = doc.content.toLowerCase().includes(queryLower);
-                const libraryMatch = doc.library.toLowerCase().includes(queryLower);
-                const urlMatch = doc.url.toLowerCase().includes(queryLower);
-
-                if (titleMatch || descMatch || contentMatch || libraryMatch || urlMatch) {
-                  // Calculate relevance score
-                  let score = 0;
-                  if (titleMatch) score += 0.4;
-                  if (descMatch) score += 0.2;
-                  if (libraryMatch) score += 0.2;
-                  if (contentMatch) score += 0.2;
-
-                  // Extract highlights
-                  const highlights: string[] = [];
-                  if (contentMatch) {
-                    const index = doc.content.toLowerCase().indexOf(queryLower);
-                    const start = Math.max(0, index - 50);
-                    const end = Math.min(doc.content.length, index + queryLower.length + 50);
-                    highlights.push('...' + doc.content.substring(start, end) + '...');
-                  }
-
-                  results.push({
-                    document: doc,
-                    score,
-                    highlights
-                  });
-                }
+                documents.push(doc);
               } catch (error) {
                 continue;
               }
@@ -284,9 +256,13 @@ export class DocFileStorage implements DocumentStorage {
         }
       }
 
-      // Sort by score and apply limit
-      results.sort((a, b) => b.score - a.score);
-      return results.slice(0, limit);
+      // Use enhanced search engine
+      return this.searchEngine.search(documents, query, {
+        limit,
+        includeHighlights: true,
+        highlightLength: 100,
+        minScore: 0.1
+      });
     } catch (error) {
       return [];
     }

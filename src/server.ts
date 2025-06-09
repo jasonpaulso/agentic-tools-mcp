@@ -20,6 +20,7 @@ import { createAgentMemoryTools } from "./tools/agent-memories/index.js";
 import { createDocumentationTools } from "./tools/documentation/index.js";
 import { ToolRegistry } from "./tools/registry.js";
 import { createTaskManagementTools } from "./tools/task-management/index.js";
+import { createUnifiedSearchTools } from "./tools/unified-search/index.js";
 import { PromptRegistry } from "./features/prompts/registry.js";
 import { registerPrompts } from "./prompts/index.js";
 import { StorageConfig } from "./utils/storage-config.js";
@@ -96,6 +97,7 @@ app.post(
         ...createTaskManagementTools(registry),
         ...createAgentMemoryTools(registry),
         ...createDocumentationTools(registry),
+        ...createUnifiedSearchTools(registry),
       ]);
 
       // Create prompt registry and register all prompts

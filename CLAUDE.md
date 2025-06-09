@@ -64,10 +64,13 @@ Intelligent memory system with file-based storage:
 ### Feature: Documentation (`src/features/documentation/`)
 Web documentation scraping and indexing system:
 - **Models**: Document model with library/version tracking and metadata
-- **Storage**: Dual storage system (project and global) with JSON files in `.agentic-tools-mcp/docs/`
+- **Storage**: Dual storage system (project and global) with JSON files
+  - Project docs: `.agentic-tools-mcp/docs/` in working directory
+  - Global docs (local): `~/.agentic-tools-mcp/global-docs/`
+  - Global docs (Docker): `/data/.agentic-tools-mcp/global-docs/` (persisted via volume mount)
 - **Scraping**: HTML to Markdown conversion with metadata extraction
 - **Search**: Text-based search with relevance scoring and snippet highlighting
-- **Tools**: scrape_docs, search_docs, list_libraries, remove_docs
+- **Tools**: scrape_docs, search_docs, list_libraries, remove_docs, sync_docs, update_docs
 
 ### Environment Variables
 - `PORT` - HTTP server port (default: 3000)

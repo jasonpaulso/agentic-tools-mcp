@@ -92,19 +92,21 @@ export function createAdvancedTaskTools(registry: ToolRegistry): ToolDefinition[
     // Research Task
     createTool(
       'research_task',
-      'Guide the AI agent to perform comprehensive web research for a task, with intelligent research suggestions and automatic memory storage of findings. Combines web research capabilities with local knowledge caching for optimal research workflow.',
+      'Guide the AI agent to perform comprehensive web research for a task, with intelligent research suggestions and automatic memory storage of findings. Combines web research capabilities with local knowledge caching and indexed documentation for optimal research workflow.',
       z.object({
         workingDirectory: z.string().describe(getWorkingDirectoryDescription(config)),
         taskId: z.string().describe('ID of the task to research'),
         researchAreas: z.array(z.string()).optional().describe('Specific areas to research (auto-generated if not provided)'),
         saveToMemories: z.boolean().optional().default(true).describe('Whether to save research findings to memories'),
         checkExistingMemories: z.boolean().optional().default(true).describe('Whether to check existing memories first'),
+        checkDocumentation: z.boolean().optional().default(true).describe('Whether to check indexed documentation'),
         researchDepth: z.enum(['quick', 'standard', 'comprehensive']).optional().default('standard').describe('Depth of research to perform'),
       }),
       async ({ workingDirectory, ...params }) => {
         const storage = await registry.createTaskStorage(workingDirectory);
         const memoryStorage = await registry.createMemoryStorage(workingDirectory);
-        const tool = createTaskResearchTool(storage, memoryStorage, getWorkingDirectoryDescription, config);
+        const docStorage = await registry.createDocStorage(workingDirectory);
+        const tool = createTaskResearchTool(storage, memoryStorage, getWorkingDirectoryDescription, config, docStorage);
         return await tool.handler({ workingDirectory, ...params });
       }
     ),

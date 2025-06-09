@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { Task } from '../../models/task.js';
 import { Storage } from '../../storage/storage.js';
 import { FileStorage as MemoryFileStorage } from '../../../agent-memories/storage/file-storage.js';
+import { DualDocStorage } from '../../../documentation/storage/dual-storage.js';
+import { DocumentSearchResult } from '../../../documentation/storage/storage.js';
 
 /**
  * Research tool that guides the AI agent to perform web research for tasks
@@ -11,7 +13,8 @@ export function createTaskResearchTool(
   storage: Storage,
   memoryStorage: MemoryFileStorage,
   getWorkingDirectoryDescription: (config: any) => string,
-  config: any
+  config: any,
+  docStorage?: DualDocStorage
 ) {
   return {
     name: 'research_task',
@@ -22,6 +25,7 @@ export function createTaskResearchTool(
       researchAreas: z.array(z.string()).optional().describe('Specific areas to research (auto-generated if not provided)'),
       saveToMemories: z.boolean().optional().default(true).describe('Whether to save research findings to memories'),
       checkExistingMemories: z.boolean().optional().default(true).describe('Whether to check existing memories first'),
+      checkDocumentation: z.boolean().optional().default(true).describe('Whether to check indexed documentation'),
       researchDepth: z.enum(['quick', 'standard', 'comprehensive']).optional().default('standard').describe('Depth of research to perform')
     }),
     handler: async (args: any) => {
@@ -32,6 +36,7 @@ export function createTaskResearchTool(
           researchAreas,
           saveToMemories,
           checkExistingMemories,
+          checkDocumentation,
           researchDepth
         } = args;
 
@@ -53,6 +58,12 @@ export function createTaskResearchTool(
           existingKnowledge = await checkExistingMemoriesForTask(memoryStorage, task);
         }
 
+        // Check documentation if requested and available
+        let documentationFindings = '';
+        if (checkDocumentation && docStorage) {
+          documentationFindings = await checkDocumentationForTask(docStorage, task);
+        }
+
         // Generate research areas if not provided
         const finalResearchAreas = researchAreas || generateResearchAreas(task);
 
@@ -61,7 +72,8 @@ export function createTaskResearchTool(
           task,
           finalResearchAreas,
           researchDepth,
-          existingKnowledge
+          existingKnowledge,
+          documentationFindings
         );
 
         // Create memory storage instructions if requested
@@ -82,6 +94,9 @@ export function createTaskResearchTool(
 
 ${existingKnowledge ? `📚 **Existing Knowledge Found:**
 ${existingKnowledge}
+
+` : ''}${documentationFindings ? `📖 **Documentation Found:**
+${documentationFindings}
 
 ` : ''}🎯 **Research Areas to Investigate:**
 ${finalResearchAreas.map((area: string, index: number) => `${index + 1}. ${area}`).join('\n')}
@@ -109,6 +124,48 @@ ${memoryInstructions}
       }
     }
   };
+}
+
+/**
+ * Check documentation for relevant information about the task
+ */
+async function checkDocumentationForTask(
+  docStorage: DualDocStorage,
+  task: Task
+): Promise<string> {
+  try {
+    // Extract relevant search terms from task
+    const searchTerms = [
+      task.name,
+      ...task.details.split(' ').filter(word => word.length > 4).slice(0, 5),
+      ...(task.tags || [])
+    ];
+
+    let relevantDocs: string[] = [];
+
+    // Search for each term
+    for (const term of searchTerms.slice(0, 3)) { // Limit searches
+      try {
+        const results = await docStorage.searchDocuments(term, 5);
+        
+        for (const result of results.slice(0, 3)) {
+          const doc = result.document;
+          const highlight = result.highlights?.[0] || doc.content.substring(0, 150);
+          relevantDocs.push(`• ${doc.library} v${doc.version}: ${highlight}...`);
+        }
+      } catch (error) {
+        continue;
+      }
+    }
+
+    if (relevantDocs.length > 0) {
+      return `Found ${relevantDocs.length} relevant documentation entries:\n${[...new Set(relevantDocs)].slice(0, 5).join('\n')}`;
+    }
+
+    return '';
+  } catch (error) {
+    return '';
+  }
 }
 
 /**
@@ -211,7 +268,8 @@ function generateResearchGuidance(
   task: Task,
   researchAreas: string[],
   depth: string,
-  existingKnowledge: string
+  existingKnowledge: string,
+  documentationFindings: string
 ): string {
   const depthGuidance = {
     quick: {
@@ -238,9 +296,10 @@ function generateResearchGuidance(
 **Research Depth:** ${depth.toUpperCase()} (${guidance.timeframe})
 **Focus:** ${guidance.focus}
 **Sources per area:** ${guidance.sources}
+${documentationFindings ? '\n✅ **Local Documentation Available** - Check the documentation findings above before searching the web' : ''}
 
 🌐 **Web Research Strategy:**
-1. **Start with official documentation** for any technologies mentioned
+1. ${documentationFindings ? '**Complement local documentation** with current implementation examples' : '**Start with official documentation** for any technologies mentioned'}
 2. **Look for recent tutorials and guides** (prefer content from last 2 years)
 3. **Check Stack Overflow and GitHub** for real-world implementation examples
 4. **Review best practices articles** from reputable tech blogs

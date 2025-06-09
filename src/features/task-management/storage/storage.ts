@@ -39,3 +39,6 @@ export interface StorageData {
   tasks: Task[];
   subtasks: Subtask[];
 }
+
+// Type alias for clarity in other parts of the codebase
+export type TaskStorage = Storage;

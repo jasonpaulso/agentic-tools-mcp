@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from "zod";
 import { FileStorage as MemoryFileStorage } from '../features/agent-memories/storage/file-storage.js';
 import { FileStorage } from '../features/task-management/storage/file-storage.js';
+import { DualDocStorage } from '../features/documentation/storage/dual-storage.js';
 import { resolveWorkingDirectory, StorageConfig } from '../utils/storage-config.js';
 import { ToolDefinition } from './base-tool.js';
 
@@ -60,6 +61,15 @@ export class ToolRegistry {
   async createMemoryStorage(workingDirectory: string): Promise<MemoryFileStorage> {
     const resolvedDirectory = resolveWorkingDirectory(workingDirectory, this.config);
     const storage = new MemoryFileStorage(resolvedDirectory);
+    await storage.initialize();
+    return storage;
+  }
+
+  /**
+   * Create documentation storage instance
+   */
+  async createDocStorage(workingDirectory: string): Promise<DualDocStorage> {
+    const storage = new DualDocStorage(workingDirectory, this.config);
     await storage.initialize();
     return storage;
   }

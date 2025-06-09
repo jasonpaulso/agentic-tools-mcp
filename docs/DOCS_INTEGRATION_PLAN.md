@@ -175,47 +175,54 @@ async function resolveDocStorage(
 **New Tools:** sync_docs, update_docs
 **Version:** Ready to bump to 1.9.0 with Phase 2 features
 
-### Phase 3: Enhanced Search (Week 3)
+### Phase 3: Enhanced Search ✅ COMPLETED
 
-1. **Port search functionality**
-   - Adapt the text search from memories
-   - Add documentation-specific ranking (prioritize headers, API references)
+1. **✅ Port search functionality**
+   - ✅ Created DocumentSearchEngine with enhanced ranking
+   - ✅ Added documentation-specific scoring:
+     - Headers (15% weight)
+     - Code blocks (10% weight)
+     - API references (5% weight)
+     - Title (30% weight)
+     - Description (15% weight)
+   - ✅ Implemented intelligent highlight extraction
 
-2. **Integrate with existing search**
-   ```typescript
-   // Enhanced search across all content types
-   async function unifiedSearch(query: string): Promise<SearchResults> {
-     const [memories, tasks, docs] = await Promise.all([
-       searchMemories(query),
-       searchTasks(query),
-       searchDocs(query)
-     ]);
-     
-     return mergeAndRankResults(memories, tasks, docs);
-   }
-   ```
+2. **✅ Integrate with existing search**
+   - ✅ Created UnifiedSearchEngine that searches across all content types
+   - ✅ Implemented parallel search execution
+   - ✅ Added unified_search tool with configurable options
+   - ✅ Formatted results with type-specific display
 
-### Phase 4: Integration with Existing Features (Week 4)
+**Status:** Phase 3 complete and tested successfully. Enhanced search working across all content types.
+**New Tool:** unified_search
+**Version:** Ready to bump to 2.0.0 with unified search feature
 
-1. **Create documentation-aware prompts**
-   ```typescript
-   const DOC_AWARE_PROMPTS = [
-     {
-       name: "setup-project-docs",
-       description: "Initialize documentation for project dependencies",
-       template: "Analyze package.json and fetch docs for: {{dependencies}}"
-     },
-     {
-       name: "research-with-docs",
-       description: "Research using memories and documentation",
-       template: "Search for {{query}} in memories and {{library}} docs v{{version}}"
-     }
-   ];
-   ```
+### Phase 4: Integration with Existing Features ✅ COMPLETED
 
-2. **Enhance existing tools**
-   - Update `research_task` to check documentation
-   - Add documentation references to task metadata
+1. **✅ Create documentation-aware prompts**
+   - ✅ Created `setup-project-docs` prompt:
+     - Analyzes package.json to identify dependencies
+     - Supports auto-fetch or manual selection
+     - Includes dev dependencies option
+   - ✅ Created `research-with-docs` prompt:
+     - Searches across memories and documentation
+     - Supports library-specific searches
+     - Option to create memory from findings
+
+2. **✅ Enhance existing tools**
+   - ✅ Updated `research_task` to check documentation:
+     - Added `checkDocumentation` parameter
+     - Searches indexed docs before web research
+     - Highlights when local documentation is available
+     - Integrates findings into research guidance
+   - ✅ Fixed global docs persistence in Docker:
+     - Updated dual-storage.ts to use proper volume path
+     - Global docs now persist at `/data/.agentic-tools-mcp/global-docs/`
+
+**Status:** Phase 4 complete. Documentation fully integrated with task management.
+**New Prompts:** setup-project-docs, research-with-docs
+**Enhanced Tools:** research_task (now documentation-aware)
+**Version:** Ready to bump to 2.1.0 with Phase 4 features
 
 ## Technical Considerations
 
