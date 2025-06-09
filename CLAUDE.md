@@ -61,6 +61,14 @@ Intelligent memory system with file-based storage:
 - **Storage**: Individual JSON files organized by category in `.agentic-tools-mcp/memories/`
 - **Search**: Multi-field text search with relevance scoring (title 60%, content 30%, category 20%)
 
+### Feature: Documentation (`src/features/documentation/`)
+Web documentation scraping and indexing system:
+- **Models**: Document model with library/version tracking and metadata
+- **Storage**: Dual storage system (project and global) with JSON files in `.agentic-tools-mcp/docs/`
+- **Scraping**: HTML to Markdown conversion with metadata extraction
+- **Search**: Text-based search with relevance scoring and snippet highlighting
+- **Tools**: scrape_docs, search_docs, list_libraries, remove_docs
+
 ### Key Design Patterns
 - All tools require `workingDirectory` parameter for project isolation
 - HTTP clients can override storage mode with headers

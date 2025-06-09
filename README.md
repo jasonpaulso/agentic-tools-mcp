@@ -94,6 +94,12 @@ This MCP server is part of a complete task and memory management ecosystem:
 - `execute_prompt` - Execute a saved prompt template with provided arguments
 - `initialize_system_prompts` - Load 8 pre-built prompts for common workflows
 
+#### Documentation Management
+- `scrape_docs` - Scrape and index documentation from any URL
+- `search_docs` - Search through indexed documentation with relevance scoring
+- `list_libraries` - View all indexed documentation libraries and versions
+- `remove_docs` - Remove documentation for specific libraries or versions
+
 **Important**: All tools require a `workingDirectory` parameter to specify where the data should be stored. This enables project-specific task and memory management.
 
 ## Deployment

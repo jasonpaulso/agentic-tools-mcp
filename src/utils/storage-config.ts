@@ -67,3 +67,11 @@ export function getWorkingDirectoryDescription(config: StorageConfig): string {
   
   return baseDescription + ' NOTE: When server is started with --claude flag, this parameter is ignored and a global user directory is used instead.';
 }
+
+/**
+ * Get the current storage configuration
+ * This is a convenience function for tools that need to access the config
+ */
+export function getStorageConfig(): StorageConfig {
+  return parseCommandLineArgs();
+}

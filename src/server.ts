@@ -21,6 +21,7 @@ import { SYSTEM_PROMPTS } from "./features/prompts/system-prompts.js";
 import { createAgentMemoryTools } from "./tools/agent-memories/index.js";
 import { ToolRegistry } from "./tools/registry.js";
 import { createTaskManagementTools } from "./tools/task-management/index.js";
+import { createDocumentationTools } from "./tools/documentation/index.js";
 import {
   resolveWorkingDirectory,
   StorageConfig,
@@ -97,6 +98,7 @@ app.post(
       registry.registerTools([
         ...createTaskManagementTools(registry),
         ...createAgentMemoryTools(registry),
+        ...createDocumentationTools(registry),
       ]);
 
       // Setup prompts storage
