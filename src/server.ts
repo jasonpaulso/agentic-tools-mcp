@@ -1,16 +1,8 @@
 /**
- * HTTP-based MCP server for Agentic Tools with backwards compatibility
- * 
- * This server supports two transport methods:
- * 
- * 1. StreamableHTTPServerTransport (modern protocol):
- *    - Endpoints: /mcp (POST/GET/DELETE)
- *    - Supports resumability and session management
- * 
- * 2. SSEServerTransport (legacy protocol for SSE-limited clients):
- *    - Endpoints: /sse (GET), /messages (POST)
- *    - Provides backwards compatibility for older clients
- * 
+ * HTTP-based MCP server for Agentic Tools with Prompts support
+ *
+ * This server uses StreamableHTTPServerTransport to provide MCP functionality over HTTP.
+ *
  * Configuration:
  * - To enable global directory mode (equivalent to --claude flag), clients should set
  *   the "mcp-use-global-directory: true" header in the initial request
@@ -19,23 +11,27 @@
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import express from "express";
 import { IncomingMessage, ServerResponse } from "http";
 import { randomUUID } from "node:crypto";
-import { StorageConfig } from "./utils/storage-config.js";
-import { getVersion } from "./utils/version.js";
+import { z } from "zod";
+import { FileStorage as PromptsFileStorage } from "./features/prompts/storage/file-storage.js";
+import { SYSTEM_PROMPTS } from "./features/prompts/system-prompts.js";
+import { createAgentMemoryTools } from "./tools/agent-memories/index.js";
 import { ToolRegistry } from "./tools/registry.js";
 import { createTaskManagementTools } from "./tools/task-management/index.js";
-import { createAgentMemoryTools } from "./tools/agent-memories/index.js";
-import { createPromptsTools } from "./tools/prompts/index.js";
+import {
+  resolveWorkingDirectory,
+  StorageConfig,
+} from "./utils/storage-config.js";
+import { getVersion } from "./utils/version.js";
 
 const app = express();
 app.use(express.json());
 
 // Map to store transports by session ID
-const transports: { [sessionId: string]: StreamableHTTPServerTransport | SSEServerTransport } = {};
+const transports: { [sessionId: string]: StreamableHTTPServerTransport } = {};
 
 // Map to store storage configurations by session ID
 const sessionConfigs: { [sessionId: string]: StorageConfig } = {};
@@ -52,25 +48,13 @@ app.post(
     let transport: StreamableHTTPServerTransport;
 
     if (sessionId && transports[sessionId]) {
-      // Reuse existing transport - ensure it's a StreamableHTTPServerTransport
-      const existingTransport = transports[sessionId];
-      if (!(existingTransport instanceof StreamableHTTPServerTransport)) {
-        res.statusCode = 400;
-        res.end(JSON.stringify({
-          jsonrpc: "2.0",
-          error: {
-            code: -32000,
-            message: "Session is not a StreamableHTTP session",
-          },
-          id: null,
-        }));
-        return;
-      }
-      transport = existingTransport;
+      // Reuse existing transport
+      transport = transports[sessionId];
     } else if (!sessionId && isInitializeRequest(req.body)) {
       // Get storage config from headers
       // Clients should set "mcp-use-global-directory: true" header to enable global directory mode
-      const useGlobalDirectory = req.headers["mcp-use-global-directory"] === "true";
+      const useGlobalDirectory =
+        req.headers["mcp-use-global-directory"] === "true";
       const config: StorageConfig = {
         useGlobalDirectory,
       };
@@ -93,10 +77,18 @@ app.post(
         }
       };
 
-      const server = new McpServer({
-        name: "@pimzino/agentic-tools-mcp",
-        version: getVersion(),
-      });
+      const server = new McpServer(
+        {
+          name: "@pimzino/agentic-tools-mcp",
+          version: getVersion(),
+        },
+        {
+          capabilities: {
+            prompts: {},
+            tools: {},
+          },
+        }
+      );
 
       // Create tool registry
       const registry = new ToolRegistry(server, config);
@@ -105,8 +97,122 @@ app.post(
       registry.registerTools([
         ...createTaskManagementTools(registry),
         ...createAgentMemoryTools(registry),
-        ...createPromptsTools(registry),
       ]);
+
+      // Setup prompts storage
+      const createPromptStorage = async (
+        workingDirectory: string
+      ): Promise<PromptsFileStorage> => {
+        const resolvedDirectory = resolveWorkingDirectory(
+          workingDirectory,
+          config
+        );
+        const storage = new PromptsFileStorage(resolvedDirectory);
+        await storage.initialize();
+        return storage;
+      };
+
+      // Initialize system prompts
+      const workingDirectory = config.useGlobalDirectory ? "~" : process.cwd();
+      const promptStorage = await createPromptStorage(workingDirectory);
+
+      // Check if prompts are already initialized
+      const existingPrompts = await promptStorage.listPrompts();
+      if (existingPrompts.length === 0) {
+        for (const systemPrompt of SYSTEM_PROMPTS) {
+          await promptStorage.createPrompt(systemPrompt);
+        }
+      }
+
+      // Register prompts with McpServer
+      const allPrompts = await promptStorage.listPrompts();
+      for (const prompt of allPrompts) {
+        // Build argument schema dynamically
+        const argsSchema: Record<string, any> = {};
+        for (const arg of prompt.arguments) {
+          if (arg.required) {
+            argsSchema[arg.name] = z.string().describe(arg.description);
+          } else {
+            argsSchema[arg.name] = z
+              .string()
+              .optional()
+              .describe(arg.description);
+          }
+        }
+
+        // Register the prompt
+        server.prompt(
+          prompt.name,
+          prompt.description,
+          argsSchema,
+          async (args) => {
+            // Process arguments with defaults
+            const finalArgs: Record<string, any> = {};
+            for (const arg of prompt.arguments) {
+              if (args[arg.name] !== undefined) {
+                finalArgs[arg.name] = args[arg.name];
+              } else if (arg.default !== undefined) {
+                finalArgs[arg.name] = arg.default;
+              }
+            }
+
+            // Generate messages
+            const messages: any[] = [];
+
+            if (prompt.template) {
+              // Process template
+              let processedTemplate = prompt.template;
+
+              // Simple variable substitution
+              for (const [key, value] of Object.entries(finalArgs)) {
+                const regex = new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, "g");
+                processedTemplate = processedTemplate.replace(
+                  regex,
+                  String(value)
+                );
+              }
+
+              // Handle conditional blocks
+              processedTemplate = processedTemplate.replace(
+                /\{\{#if\s+(\w+)\}\}(.*?)\{\{\/if\}\}/gs,
+                (_match, varName, content) => {
+                  return finalArgs[varName] ? content : "";
+                }
+              );
+
+              messages.push({
+                role: "user",
+                content: {
+                  type: "text",
+                  text: processedTemplate.trim(),
+                },
+              });
+            } else if (prompt.messages) {
+              // Use predefined messages
+              for (const msg of prompt.messages) {
+                if (msg.content.text) {
+                  let processedText = msg.content.text;
+                  for (const [key, value] of Object.entries(finalArgs)) {
+                    const regex = new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, "g");
+                    processedText = processedText.replace(regex, String(value));
+                  }
+                  messages.push({
+                    role: msg.role,
+                    content: {
+                      type: "text",
+                      text: processedText,
+                    },
+                  });
+                } else {
+                  messages.push(msg);
+                }
+              }
+            }
+
+            return { messages };
+          }
+        );
+      }
 
       // Connect to the MCP server
       await server.connect(transport);
@@ -142,14 +248,6 @@ const handleSessionRequest = async (
   }
 
   const transport = transports[sessionId];
-  
-  // Ensure this is a StreamableHTTPServerTransport
-  if (!(transport instanceof StreamableHTTPServerTransport)) {
-    res.statusCode = 400;
-    res.end("Session is not a StreamableHTTP session");
-    return;
-  }
-  
   await transport.handleRequest(req, res);
 };
 
@@ -159,125 +257,7 @@ app.get("/mcp", handleSessionRequest);
 // Handle DELETE requests for session termination
 app.delete("/mcp", handleSessionRequest);
 
-// ============================================
-// Backwards compatibility for SSE limited clients
-// ============================================
-
-// Handle SSE connections for older clients
-app.get("/sse", async (req: express.Request, res: express.Response) => {
-  console.log("SSE connection requested (legacy client)");
-  
-  // Get storage config from headers
-  const useGlobalDirectory = req.headers["mcp-use-global-directory"] === "true";
-  const config: StorageConfig = {
-    useGlobalDirectory,
-  };
-
-  // Create SSE transport
-  const transport = new SSEServerTransport("/messages", res);
-  
-  // Store transport and config by session ID
-  transports[transport.sessionId] = transport;
-  sessionConfigs[transport.sessionId] = config;
-  
-  // Clean up on connection close
-  res.on("close", () => {
-    delete transports[transport.sessionId];
-    delete sessionConfigs[transport.sessionId];
-    console.log(`SSE connection closed: ${transport.sessionId}`);
-  });
-
-  // Create and connect server
-  const server = new McpServer({
-    name: "@pimzino/agentic-tools-mcp",
-    version: getVersion(),
-  });
-
-  // Create tool registry
-  const registry = new ToolRegistry(server, config);
-
-  // Register all tools
-  registry.registerTools([
-    ...createTaskManagementTools(registry),
-    ...createAgentMemoryTools(registry),
-  ]);
-
-  // Connect to the MCP server
-  await server.connect(transport);
-  
-  console.log(`SSE transport initialized: ${transport.sessionId}`);
-});
-
-// Handle messages from SSE clients
-app.post("/messages", async (req: express.Request, res: express.Response) => {
-  const sessionId = req.headers["mcp-session-id"] as string | undefined;
-  
-  if (!sessionId || !transports[sessionId]) {
-    res.status(400).json({
-      jsonrpc: "2.0",
-      error: {
-        code: -32000,
-        message: "Invalid or missing session ID",
-      },
-      id: null,
-    });
-    return;
-  }
-  
-  const transport = transports[sessionId];
-  
-  // Ensure this is an SSE transport
-  if (!(transport instanceof SSEServerTransport)) {
-    res.status(400).json({
-      jsonrpc: "2.0",
-      error: {
-        code: -32000,
-        message: "Session is not an SSE session",
-      },
-      id: null,
-    });
-    return;
-  }
-  
-  // Handle the message
-  await transport.handleMessage(req.body);
-  
-  // SSE transport doesn't send responses via POST
-  res.status(200).json({ success: true });
-});
-
-// Health check endpoint
-app.get("/health", (req, res) => {
-  res.status(200).json({
-    status: "healthy",
-    version: getVersion(),
-    uptime: process.uptime(),
-    sessions: Object.keys(transports).length
-  });
-});
-
 const PORT = process.env.PORT || 3000;
-const server = app.listen(PORT, () => {
+app.listen(PORT, () => {
   console.log(`🌐 HTTP MCP server ready on port ${PORT}`);
-  console.log(`   - Modern clients: POST/GET/DELETE /mcp`);
-  console.log(`   - Legacy SSE clients: GET /sse, POST /messages`);
-});
-
-// Graceful shutdown
-process.on("SIGTERM", async () => {
-  console.log("SIGTERM received, shutting down gracefully...");
-  
-  // Close all transports
-  for (const sessionId of Object.keys(transports)) {
-    const transport = transports[sessionId];
-    if (transport && "close" in transport) {
-      await transport.close();
-    }
-  }
-  
-  // Close the server
-  server.close(() => {
-    console.log("Server closed");
-    process.exit(0);
-  });
 });
