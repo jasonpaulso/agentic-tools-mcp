@@ -7,7 +7,7 @@ import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 export interface ToolDefinition {
   name: string;
   description: string;
-  inputSchema: z.ZodSchema<any>;
+  inputSchema: Record<string, z.ZodTypeAny>;
   handler: (args: any) => Promise<CallToolResult>;
 }
 
@@ -41,13 +41,13 @@ export function handleToolError(error: unknown): CallToolResult {
 export function createTool(
   name: string,
   description: string,
-  inputSchema: z.ZodSchema<any>,
+  inputSchema: z.ZodObject<any>,
   handler: (args: any) => Promise<CallToolResult>
 ): ToolDefinition {
   return {
     name,
     description,
-    inputSchema,
+    inputSchema: inputSchema.shape,
     handler: async (args: any) => {
       try {
         return await handler(args);

@@ -9,7 +9,7 @@ import { createUpdateSubtaskTool } from '../../features/task-management/tools/su
 import { createDeleteSubtaskTool } from '../../features/task-management/tools/subtasks/delete.js';
 
 export function createSubtaskTools(registry: ToolRegistry): ToolDefinition[] {
-  const config = registry['config'];
+  const config = registry.config;
   
   return [
     // List Subtasks

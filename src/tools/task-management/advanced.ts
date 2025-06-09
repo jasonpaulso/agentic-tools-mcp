@@ -10,7 +10,7 @@ import { createTaskResearchTool } from '../../features/task-management/tools/res
 import { createResearchQueriesGeneratorTool } from '../../features/task-management/tools/research/research-queries.js';
 
 export function createAdvancedTaskTools(registry: ToolRegistry): ToolDefinition[] {
-  const config = registry['config'];
+  const config = registry.config;
   
   return [
     // Parse PRD

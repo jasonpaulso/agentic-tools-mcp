@@ -25,7 +25,7 @@ export class ToolRegistry {
     this.server.tool(
       tool.name,
       tool.description,
-      tool.inputSchema.shape,
+      tool.inputSchema,
       tool.handler
     );
   }

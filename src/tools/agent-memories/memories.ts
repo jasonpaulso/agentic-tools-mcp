@@ -10,7 +10,7 @@ import { createUpdateMemoryTool } from '../../features/agent-memories/tools/memo
 import { createDeleteMemoryTool } from '../../features/agent-memories/tools/memories/delete.js';
 
 export function createMemoryTools(registry: ToolRegistry): ToolDefinition[] {
-  const config = registry['config'];
+  const config = registry.config;
   
   return [
     // Create Memory
